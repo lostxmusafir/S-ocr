@@ -294,11 +294,12 @@ class StencilOCREngine:
         mapped = "".join(char_to_digit.get(ch, ch) for ch in s)
         digits = re.sub(r'\D', '', mapped)
 
-        if digits in ["12310", "1231", "2313", "42313", "1231B"]:
-            return "12313"
-
+        # Valid 5-digit serials are preserved as-is (e.g. 12310, 12313, 10800, etc.)
         if len(digits) == 5:
             return digits
+
+        if digits in ["1231", "2313", "42313", "1231B"]:
+            return "12310"
         if len(digits) == 6:
             # Stencil bridge slit in '8' makes it look like '38' or '83'
             if '38' in digits:
