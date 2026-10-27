@@ -53,7 +53,8 @@ MODEL_ALIASES = {
     "M4G": "446", "M4F": "446", "IN4G": "446", "IA4G": "446", "INAG": "446", "INAC": "446",
     "NA.G": "446", "INA.G": "446", "AA4G": "446", "4G": "446", "44": "446", "4++": "446",
     "4+4+": "446", "44I": "446", "44E": "446", "A4G6": "446", "441": "446", "44L": "446",
-    "4466": "446", "4406": "446", "42N46": "446",
+    "4466": "446", "4406": "446", "42N46": "446", "MA4G": "446", "NA4G": "446", "MA46": "446",
+    "NA46": "446", "4A4G": "446", "A44G": "446",
     "44S": "445", "4S": "445", "N45": "445", "A45": "445", "445": "445",
     "44A": "444", "4A": "444", "A44": "444", "N44": "444", "444": "444",
     "44T": "447", "4T": "447", "A47": "447", "N47": "447", "447": "447",
@@ -65,6 +66,11 @@ class StencilOCREngine:
     def __init__(self):
         # Initialize RapidOCR engine
         self.ocr = RapidOCR()
+        try:
+            self.ocr.text_detector.preprocess_op[0].limit_type = 'max'
+            self.ocr.text_detector.preprocess_op[0].limit_side_len = 960
+        except Exception:
+            pass
         # Warm up engine sessions for immediate sub-second response
         try:
             dummy = np.zeros((64, 128, 3), dtype=np.uint8)
@@ -189,18 +195,18 @@ class StencilOCREngine:
         t = re.sub(r'(' + state_pat + r')(\d{2,4})', r'\1/\2', t)
         # 2. MFR 142 followed by separator I, 1, l, |, ! or direct model
         t = re.sub(r'(?:^|/)142[I1l|!/]+(?=[4ANM3])', '/142/', t)
-        model_pat = r'(?:44[4-7A-Za-z]|I?[AN4MH][AN4MH][6GCQ0BF+]|I[AN]4G|IA4G|3674|3528|4A4|4)'
+        model_pat = r'(?:44[4-7A-Za-z]|I?[AN4MH][AN4MH][AN4MH+]?[6GCQ0BF+]|I[AN]4G|IA4G|3674|3528|4A4|4)'
         t = re.sub(r'(?:^|/)142(' + model_pat + r')', r'/142/\1', t)
         # 3. Model + Year (e.g. 4462026 -> 446/2026, IN4G2026 -> IN4G/2026, 36742026 -> 3674/2026, including 202)
         t = re.sub(r'(' + model_pat + r')(202[0-9A-Za-z]?|20[12]\d)', r'\1/\2', t)
         # 4. Year + Serial (e.g. 202612313 -> 2026/12313, including 202)
         t = re.sub(r'(202[0-9A-Za-z]?|20[12]\d)([0-9A-Za-z]{5,6})', r'\1/\2', t)
-        # Suffix UP normalization with or without separator (e.g. 12313/UP, 12313UIP, 12313LIP, 123137UP)
-        # Match only letters U and P at the end, NEVER digits
-        t = re.sub(r'(?<=\d)[|Il7\s/\-_]+[UuLl][Ii1|]?[Pp]$', '/UP', t)
-        t = re.sub(r'(?<=\d)[UuLl][Ii1|]?[Pp]$', '/UP', t)
-        t = re.sub(r'/+[UuLl][Ii1|]?[Pp]$', '/UP', t)
-        t = re.sub(r'(?<=\d)([Uu][PpDd])$', r'/UP', t)
+        # Suffix UP normalization with or without separator (e.g. 12313/UP, 12313UIP, 12313LIP, 123137UP, 11881/UF)
+        # Match only letters U and P (or P stencil bridge confusions F/D) at the end, NEVER digits
+        t = re.sub(r'(?<=\d)[|Il7\s/\-_]+[UuLl][Ii1|]?[PpDdFf]$', '/UP', t)
+        t = re.sub(r'(?<=\d)[UuLl][Ii1|]?[PpDdFf]$', '/UP', t)
+        t = re.sub(r'/+[UuLl][Ii1|]?[PpDdFf]$', '/UP', t)
+        t = re.sub(r'(?<=\d)([Uu][PpDdFf])$', r'/UP', t)
         return t
 
     def _normalize_model(self, model: str) -> str:
@@ -219,11 +225,11 @@ class StencilOCREngine:
         if m in ["44", "4"]:
             return "446"
 
-        # Model 446: char1 in [4,A,N,M,H,IA,IN], char2 in [4,A,N,M,H], char3 in [6,G,C,Q,0,B,F,E,I,L]
-        if re.match(r'^(?:[I1]?[AN4MH]|4)[AN4MH+]?[6GCQ0BF+EIL]$', m) or m in [
+        # Model 446: char1 in [4,A,N,M,H,IA,IN], char2/3 in [4,A,N,M,H], last in [6,G,C,Q,0,B,F,E,I,L]
+        if re.match(r'^(?:[I1]?[AN4MH]|4)[AN4MH+]{1,2}[6GCQ0BF+EIL]$', m) or m in [
             '44G', '4G', '440', '44C', '44B', '44Q', '4AG', '4AC', '4AF', 'AAG', 'AAC',
             'AAF', 'NAG', 'NAC', 'NAF', 'MAG', 'MAF', 'IN4G', 'IA4G', 'INAG', 'AA4G', '44', '4++',
-            '44I', '44E', '44L', '441', 'A4G6'
+            '44I', '44E', '44L', '441', 'A4G6', 'MA4G', 'NA4G', 'MA46', 'NA46', '4A4G', 'A44G'
         ]:
             return '446'
 
@@ -258,9 +264,9 @@ class StencilOCREngine:
         return m
 
     def _normalize_year(self, year: str) -> str:
-        """Normalizes year token (e.g. 202G, 202C, 2020, 2024 with stencil slit in 6 -> 2026)."""
+        """Normalizes year token (e.g. 202G, 202C, 2020, 2021, 2024 with stencil slit in 6 -> 2026)."""
         y = year.upper().strip()
-        if re.match(r'^202[GCQ0BF4b]?$', y) or y in ["202", "2O26", "2020", "2O2G"]:
+        if re.match(r'^202[GCQ0BF4b1ILI!|\]tT]?$', y) or y in ["202", "2O26", "2020", "2O2G", "2021", "2O21", "202I"]:
             return "2026"
         return y
 
@@ -320,12 +326,12 @@ class StencilOCREngine:
         return digits
 
     def _normalize_suffix(self, suffix: str) -> str:
-        """Normalizes suffix token (e.g. UIP / LIP / UD / 7UP / 1UP -> UP)."""
+        """Normalizes suffix token (e.g. UIP / LIP / UD / 7UP / 1UP / UF -> UP)."""
         s = suffix.upper().strip('/|-_ ')
         if s in ["UIP", "LIP", "7UP", "UP", "U|P", "LP", "UD", "U0", "UB", "UR", "U|D", "L|D", "U.P",
-                 "VIP", "VP", "1UP", "IUP", "U", "P", "JIP", "TUP", "UPP", "U_P", "U-P"]:
+                 "VIP", "VP", "1UP", "IUP", "U", "P", "JIP", "TUP", "UPP", "U_P", "U-P", "UF", "UIF", "LIF"]:
             return "UP"
-        if re.search(r'^[ULV1I7][I1|]?[PDBR0]$', s):
+        if re.search(r'^[ULV1I7][I1|]?[PDBR0F]$', s):
             return "UP"
         return s
 
@@ -365,7 +371,7 @@ class StencilOCREngine:
                     if suf == "UP":
                         result["suffix"] = "UP"
                 # Cross-validation: Serial 12xxx/11xxx or suffix UP is always Tusker model 446
-                if (result["serial_no"].startswith(('12', '11')) or result["suffix"] == "UP") and result["model_code"] in ["444", "4A4", "44A", "4"]:
+                if (result["serial_no"].startswith(('12', '11')) or result["suffix"] == "UP") and result["model_code"] in ["444", "4A4", "44A", "4", "MA4G", "NA4G", "AA4G", "IN4G", "M4G"]:
                     result["model_code"] = "446"
                 result["is_valid"] = True
             elif len(parts) == 4:
@@ -414,7 +420,7 @@ class StencilOCREngine:
         t_norm = re.sub(r'(?:^|/)142[I1l|!/]+(?=[4ANM3])', '/142/', t_norm)
 
         # Handle dropped slash between mfr and model e.g. GJ/1424G/ -> GJ/142/4G/
-        model_pat = r'(?:44[4-7A-Za-z]|I?[AN4MH][AN4MH][6GCQ0BF+]|I[AN]4G|IA4G|3674|3528|4A4|4)'
+        model_pat = r'(?:44[4-7A-Za-z]|I?[AN4MH][AN4MH][AN4MH+]?[6GCQ0BF+]|I[AN]4G|IA4G|3674|3528|4A4|4)'
         t_norm = re.sub(r'(' + state_pat + r')[/1|Il]1[ANH4]2(' + model_pat + r')', r'\1/142/\2', t_norm)
         t_norm = re.sub(r'(' + state_pat + r')/142(' + model_pat + r')', r'\1/142/\2', t_norm)
         t_norm = re.sub(r'(' + state_pat + r')/142([A-Za-z0-9\.\+]{1,6})/', r'\1/142/\2/', t_norm)
@@ -434,7 +440,7 @@ class StencilOCREngine:
             year = self._normalize_year(m.group(4))
             serial = self._normalize_serial(m.group(5))
             suffix = self._normalize_suffix(m.group(6)) if m.group(6) else ""
-            if (serial.startswith(('12', '11')) or suffix == "UP") and model in ['444', '4A4', '44A', '4']:
+            if (serial.startswith(('12', '11')) or suffix == "UP") and model in ['444', '4A4', '44A', '4', 'MA4G', 'NA4G', 'AA4G', 'IN4G', 'M4G']:
                 model = '446'
             res = f"{state}/{mfr}/{model}/{year}/{serial}"
             if suffix == "UP":
@@ -453,7 +459,7 @@ class StencilOCREngine:
             year = self._normalize_year(m_nostate.group(3))
             serial = self._normalize_serial(m_nostate.group(4))
             suffix = self._normalize_suffix(m_nostate.group(5)) if m_nostate.group(5) else ""
-            if (serial.startswith(('12', '11')) or suffix == "UP") and model in ['444', '4A4', '44A', '4']:
+            if (serial.startswith(('12', '11')) or suffix == "UP") and model in ['444', '4A4', '44A', '4', 'MA4G', 'NA4G', 'AA4G', 'IN4G', 'M4G']:
                 model = '446'
             res = f"{state}/{mfr}/{model}/{year}/{serial}"
             if suffix == "UP":
@@ -861,7 +867,7 @@ class StencilOCREngine:
         best_dets = []
 
         for get_target_img, angle, mirrored, tag in schedule:
-            if time.time() - t0 > 1.35 and best_dets:
+            if (time.time() - t0 > 1.15 and best_dets) or (time.time() - t0 > 1.25):
                 break
             target_img = get_target_img()
             dets, lines, is_crop_mirrored = run_ocr_on_img(target_img, check_mirror=not mirrored)

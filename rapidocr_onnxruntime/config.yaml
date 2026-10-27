@@ -13,8 +13,8 @@ Det:
     class_name: TextDetector
     model_path: models/ch_PP-OCRv3_det_infer.onnx
 
-    limit_side_len: 736
-    limit_type: min
+    limit_side_len: 960
+    limit_type: max
 
     thresh: 0.3
     box_thresh: 0.5
