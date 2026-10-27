@@ -443,6 +443,12 @@
                             <p style="font-size: 12px; color: var(--text-muted);">Supports PNG, JPG, JPEG, WEBP</p>
                             <input type="file" id="fileInput" accept="image/*" style="display: none;" onchange="handleFileSelect(event)">
                         </div>
+                        <div style="margin-top: 10px; display: flex; gap: 8px;">
+                            <button type="button" class="btn btn-secondary" onclick="document.getElementById('nativeCamInput').click()" style="width: 100%; border-color: #3b82f6; color: #93c5fd;">
+                                📱 Take Sharp Photo with Phone Camera (Autofocus)
+                            </button>
+                            <input type="file" id="nativeCamInput" accept="image/*" capture="environment" style="display: none;" onchange="handleFileSelect(event)">
+                        </div>
                     </div>
 
                     <!-- Camera Tab -->
@@ -576,6 +582,16 @@
                         <span id="elapsedTag" style="font-size: 11px; color: var(--text-muted); font-family: monospace;"></span>
                     </div>
                     <img id="imgAnnotated" style="width: 100%; border-radius: 8px;" alt="Annotated Image">
+                </div>
+
+                <!-- All Detected Text Lines & Markings -->
+                <div class="card" id="allTextCard" style="display: none; margin-top: 20px;">
+                    <div class="card-header">
+                        <div class="card-title">📝 All Detected Text Lines & Markings</div>
+                        <span id="detectedCountBadge" style="font-size: 11px; background: #334155; padding: 2px 8px; border-radius: 9999px;"></span>
+                    </div>
+                    <p style="font-size: 12px; color: var(--text-muted); margin-bottom: 10px;">Every text snippet detected on the metal piece (Brand names, batch numbers, markings):</p>
+                    <div id="allTextList" style="display: flex; flex-direction: column; gap: 8px;"></div>
                 </div>
             </div>
         </div>
@@ -823,6 +839,23 @@
                 document.getElementById('elapsedTag').innerText = `Angle: ${data.best_angle}° | ${data.elapsed_ms} ms`;
             } else {
                 annotatedCard.style.display = 'none';
+            }
+
+            // All detected text items & brand markings
+            const allTextCard = document.getElementById('allTextCard');
+            const allTextList = document.getElementById('allTextList');
+            const rawDets = data.raw_detections || [];
+            if (rawDets.length > 0) {
+                allTextCard.style.display = 'block';
+                document.getElementById('detectedCountBadge').innerText = `${rawDets.length} text items`;
+                allTextList.innerHTML = rawDets.map(d => `
+                    <div style="display: flex; justify-content: space-between; align-items: center; background: #141923; padding: 8px 12px; border-radius: 6px; border: 1px solid #1e293b;">
+                        <span style="font-family: monospace; font-size: 14px; font-weight: 600; color: #f8fafc;">${d.text}</span>
+                        <span style="font-size: 11px; color: #94a3b8; background: #1e293b; padding: 2px 6px; border-radius: 4px;">Confidence: ${(d.score * 100).toFixed(0)}%</span>
+                    </div>
+                `).join('');
+            } else {
+                allTextCard.style.display = 'none';
             }
         }
 

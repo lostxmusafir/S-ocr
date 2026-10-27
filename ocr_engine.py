@@ -166,9 +166,20 @@ class StencilOCREngine:
         t = re.sub(r'2[Oo0](\d)[GgCcQq0b]', r'20\g<1>6', t)
         t = re.sub(r'2[Oo](\d\d)', r'20\g<1>', t)
 
+        # Un-glue common merged tokens where slash was faint or dropped
+        # 1. State + MFR (e.g. GJ142 -> GJ/142)
+        t = re.sub(r'(' + state_pat + r')(\d{2,4})', r'\1/\2', t)
+        # 2. MFR 142 + Model (e.g. 142446 -> 142/446, 1423674 -> 142/3674)
+        t = re.sub(r'(?:^|/)142(44[4-7A-Za-z]|3674|3528)', r'/142/\1', t)
+        # 3. Model + Year (e.g. 4462026 -> 446/2026, 36742026 -> 3674/2026)
+        t = re.sub(r'(44[4-7A-Za-z]|3674|3528)(202[0-9A-Za-z]|20[12]\d)', r'\1/\2', t)
+        # 4. Year + Serial (e.g. 202612313 -> 2026/12313)
+        t = re.sub(r'(202[0-9A-Za-z]|20[12]\d)([0-9A-Za-z]{5,6})', r'\1/\2', t)
         # Suffix UP normalization with or without separator (e.g. 12313/UP, 12313UIP, 12313LIP, 123137UP)
-        t = re.sub(r'(?<=\d)[|Il7\s/]*[UuLl][Ii1|]?[PpDd0BbRr]$', '/UP', t)
-        t = re.sub(r'/+[UuLl][Ii1|]?[PpDd0BbRr]$', '/UP', t)
+        # Match only letters U and P at the end, NEVER digits
+        t = re.sub(r'(?<=\d)[|Il7\s/\-_]+[UuLl][Ii1|]?[Pp]$', '/UP', t)
+        t = re.sub(r'(?<=\d)[UuLl][Ii1|]?[Pp]$', '/UP', t)
+        t = re.sub(r'/+[UuLl][Ii1|]?[Pp]$', '/UP', t)
         t = re.sub(r'(?<=\d)([Uu][PpDd])$', r'/UP', t)
         return t
 
@@ -236,27 +247,61 @@ class StencilOCREngine:
         """
         Normalizes and repairs serial number digits.
         Standard agricultural implements use 5-digit serial numbers.
-        Handles ghost digits from stencil bridge cuts in '8' (e.g. '38' or '83' -> '8')
+        Handles stencil slit character confusions (O->0, I->1, B->8, S->5, etc.),
+        ghost digits from stencil bridge cuts in '8' (e.g. '38' or '83' -> '8'),
         and leading duplicate '1' from slash misreads (e.g. '112313' -> '12313').
         """
-        s = re.sub(r'\D', '', serial)
-        if len(s) == 5:
-            return s
-        if len(s) == 6:
+        s = serial.strip()
+        char_to_digit = {
+            'O': '0', 'o': '0', 'D': '0', 'Q': '0',
+            'I': '1', 'i': '1', 'l': '1', '|': '1', ']': '1', '[': '1',
+            'Z': '2', 'z': '2',
+            'E': '3',
+            'A': '4', 'H': '4',
+            'S': '5', 's': '5',
+            'G': '6', 'b': '6',
+            'T': '7',
+            'B': '8',
+            'q': '9', 'g': '9'
+        }
+        mapped = "".join(char_to_digit.get(ch, ch) for ch in s)
+        digits = re.sub(r'\D', '', mapped)
+
+        if len(digits) == 5:
+            return digits
+        if len(digits) == 6:
             # Stencil bridge slit in '8' makes it look like '38' or '83'
-            if '38' in s:
-                return s.replace('38', '8', 1)
-            if '83' in s:
-                return s.replace('83', '8', 1)
-            # Leading 1 from slash separator misread (e.g. /12313 read as 112313)
-            if s.startswith('11'):
-                return s[1:]
-        return s
+            if '38' in digits:
+                return digits.replace('38', '8', 1)
+            if '83' in digits:
+                return digits.replace('83', '8', 1)
+            if digits.startswith('11'):
+                return digits[1:]
+            return digits[:5]
+        if len(digits) == 7:
+            if digits.startswith('11'):
+                digits = digits[1:]
+                if '38' in digits:
+                    digits = digits.replace('38', '8', 1)
+                elif '83' in digits:
+                    digits = digits.replace('83', '8', 1)
+                return digits[:5]
+            if '38' in digits:
+                digits = digits.replace('38', '8', 1)
+            if '83' in digits:
+                digits = digits.replace('83', '8', 1)
+            return digits[:5]
+        if len(digits) > 5:
+            return digits[:5]
+        return digits
 
     def _normalize_suffix(self, suffix: str) -> str:
-        """Normalizes suffix token (e.g. UIP / LIP / UD / 7UP -> UP)."""
-        s = suffix.upper().strip('/')
-        if s in ["UIP", "LIP", "7UP", "UP", "U|P", "LP", "UD", "U0", "UB", "UR", "U|D", "L|D", "U.P"]:
+        """Normalizes suffix token (e.g. UIP / LIP / UD / 7UP / 1UP -> UP)."""
+        s = suffix.upper().strip('/|-_ ')
+        if s in ["UIP", "LIP", "7UP", "UP", "U|P", "LP", "UD", "U0", "UB", "UR", "U|D", "L|D", "U.P",
+                 "VIP", "VP", "1UP", "IUP", "U", "P", "JIP", "TUP", "UPP", "U_P", "U-P"]:
+            return "UP"
+        if re.search(r'^[ULV1I7][I1|]?[PDBR0]$', s):
             return "UP"
         return s
 
@@ -341,9 +386,12 @@ class StencilOCREngine:
         # Handle dropped slash between mfr and model e.g. GJ/1424G/ -> GJ/142/4G/
         t_norm = re.sub(r'(' + state_pat + r')/142([A-Za-z0-9\.\+]{2,4})/', r'\1/142/\2/', t_norm)
 
-        # 5 or 6 parts: State / Mfr / Model / Year / Serial [/ Suffix]
+        # Digit characters including stencil confusions
+        D_CHARS = r'[0-9OoilIZzAHEeSsGbTBqg]'
+
+        # 5 or 6 parts (Standard full code with State prefix):
         m = re.search(
-            r'(' + state_pat + r')[/1|Il](\d{2,4})[/1|Il]([A-Za-z0-9\.\+]{2,5})[/1|Il](202[0-9A-Za-z]?|20[12]\d)[/1|Il](\d{4,6})(?:[/1|Il7]([A-Za-z0-9]+))?',
+            r'(' + state_pat + r')[/\\|I!\-\s]+(\d{2,4})[/\\|I!\-\s]+([A-Za-z0-9\.\+]{2,6})[/\\|I!\-\s]+(202[0-9A-Za-z]?|20[12]\d)[/\\|I!\-\s]+(' + D_CHARS + r'{4,7})(?:[/\\|I!7\-\s]*([A-Za-z0-9]+))?',
             t_norm
         )
         if m:
@@ -358,8 +406,25 @@ class StencilOCREngine:
                 res += f"/{suffix}"
             return res
 
+        # 5 or 6 parts fallback where State prefix was cut off at image boundary (starts with MFR 142)
+        m_nostate = re.search(
+            r'(?:^|[/\\|I!\-\s])(142)[/\\|I!\-\s]+([A-Za-z0-9\.\+]{2,6})[/\\|I!\-\s]+(202[0-9A-Za-z]?|20[12]\d)[/\\|I!\-\s]+(' + D_CHARS + r'{4,7})(?:[/\\|I!7\-\s]*([A-Za-z0-9]+))?',
+            t_norm
+        )
+        if m_nostate:
+            state = "GJ"  # MFR 142 default state
+            mfr = "142"
+            model = self._normalize_model(m_nostate.group(2))
+            year = self._normalize_year(m_nostate.group(3))
+            serial = self._normalize_serial(m_nostate.group(4))
+            suffix = self._normalize_suffix(m_nostate.group(5)) if m_nostate.group(5) else ""
+            res = f"{state}/{mfr}/{model}/{year}/{serial}"
+            if suffix:
+                res += f"/{suffix}"
+            return res
+
         # 4 parts: State / Mfr / Model / Year
-        m2 = re.search(r'(' + state_pat + r')[/1|Il](\d{2,4})[/1|Il]([A-Za-z0-9\.\+]{2,5})[/1|Il](20\d\d)', t_norm)
+        m2 = re.search(r'(' + state_pat + r')[/\\|I!\-\s]+(\d{2,4})[/\\|I!\-\s]+([A-Za-z0-9\.\+]{2,6})[/\\|I!\-\s]+(20\d\d)', t_norm)
         if m2:
             state = m2.group(1).upper()
             mfr = re.sub(r'^1[ANH4]2$', '142', m2.group(2))
@@ -407,7 +472,8 @@ class StencilOCREngine:
                 continue
 
             # Check for suffix (Year + Serial [/ Suffix])
-            m_suf = re.search(r'[/1|Il]?(202[0-9A-Za-z]?|20[12]\d)[/1|Il](\d{4,6})(?:[/1|Il7]([A-Za-z0-9]+))?', t)
+            D_CHARS = r'[0-9OoilIZzAHEeSsGbTBqg]'
+            m_suf = re.search(r'[/\\|I!\-\s]?(202[0-9A-Za-z]?|20[12]\d)[/\\|I!\-\s]+(' + D_CHARS + r'{4,7})(?:[/\\|I!7\-\s]*([A-Za-z0-9]+))?', t)
             if m_suf:
                 yr = self._normalize_year(m_suf.group(1))
                 sn = self._normalize_serial(m_suf.group(2))
