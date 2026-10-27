@@ -23,11 +23,17 @@ An industrial vision OCR application and web service built for detecting, deskew
   - 📷 **Live Camera Scanner**: Scan directly via webcam or smartphone camera (supports mobile camera switching & automatic EXIF orientation normalization).
   - 📁 **File Upload**: Upload high-resolution images (PNG, JPG, JPEG, WEBP).
   - 🖼️ **Sample Gallery**: Quick 1-click testing with all 5 sample factory parts.
-- **Robust Metal Stencil Recognition**:
+- **Robust Metal Stencil Recognition & Industrial Edge Enhancement**:
   - Handles arbitrary orientations: horizontal, vertical, 180° upside-down, and skewed parts.
+  - **Upfront Photometric Quality Analysis (< 2ms)**: Analyzes mean luminance, contrast standard deviation, shadow clipping, specular glare clipping, and Laplacian edge sharpness.
+  - **Dynamic Logarithmic Exposure Normalization**: Automatically lifts underexposed deep shadows in low light and compresses high metallic specular glare.
+  - **Mirror / Back-side Scan Detection**: Detects laser cuts photographed from the reverse side of sheet metal plates via horizontal flip evaluation in ~1.4s.
+  - **Low Clarity & Blur Edge Restoration**: High-pass unsharp masking sharpens blurred stencil cut contours and bridge boundaries.
+  - **Multi-Part Stacked Implement Detection**: Discovers and indexes multiple implement plates stacked on pallets or frames.
+  - **Early Exit Fast Path**: High-confidence codes return in ~0.8s without redundant passes.
   - Handles both **1-line** and **2-line** laser stamped layouts regardless of line detection order.
   - Robust against noise text lines, logos, and metal surface scratches.
-  - Bridges stencil gaps and splits (e.g. `CJ` → `GJ`, misread slashes `1` / `|` → `/`, letter `O` in year `2O26` → `2026`).
+  - Stencil bridge repair & normalization: handles `4AG`, `AAG`, `4AC`, `4AF`, `AAF`, `NAG`, `M4F`, `4++`, `1A2` mfr bridge, year `202G`/`2024` bridge, `118381` serial bridge split, `UD`/`UIP`/`LIP` suffixes, and tokens with internal spaces.
   - Supports all Indian State prefixes (`GJ`, `MH`, `MP`, `RJ`, `PB`, `HR`, `UP`, `KA`, `TN`, `AP`, `TS`, `DL`, etc.).
 - **High-Contrast White-on-Black Visualization ("number white me print or background in black")**:
   - **Identified number printed in glowing White text on pure Black background** (`#000000`).

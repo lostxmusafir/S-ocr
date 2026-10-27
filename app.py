@@ -183,6 +183,11 @@ sample_files = {
     "3. Two-Line Metal Plate (GJ/142/3674 & /2026/10568)": "WhatsApp Image 2026-10-22 at 4.55.32 PM.jpeg",
     "4. Vertical Tube Beam (GJ/142/445/2026/43889)": "WhatsApp Image 2026-10-22 at 4.55.32 PM (1).jpeg",
     "5. Reference Catalog Chart (List of Laser Marking Codes)": "WhatsApp Image 2026-10-22 at 4.55.33 PM.jpeg",
+    "6. [NEW] Mirrored / Back-side Scan (GJ/142/446/2026/11541)": os.path.join("new ocr data", "WhatsApp Image 2026-10-27 at 4.02.15 PM.jpeg"),
+    "7. [NEW] Harsh Gearbox Shadow & Stencil Bridges (GJ/142/446/2026/12313/UP)": os.path.join("new ocr data", "WhatsApp Image 2026-10-27 at 4.02.09 PM (1).jpeg"),
+    "8. [NEW] Bright Orange Implement Assembly (GJ/142/3674/2026/10800)": os.path.join("new ocr data", "WhatsApp Image 2026-10-27 at 4.02.16 PM (1).jpeg"),
+    "9. [NEW] Multi-Part Stacked Pallet (GJ/142/445/2026/44579)": os.path.join("new ocr data", "WhatsApp Image 2026-10-27 at 4.02.11 PM (1).jpeg"),
+    "10. [NEW] Vertical Beam Macro (GJ/142/445/2026/44579)": os.path.join("new ocr data", "WhatsApp Image 2026-10-27 at 4.02.14 PM (1).jpeg"),
 }
 
 if input_mode == "📁 Upload Image File":
@@ -266,15 +271,23 @@ if image_bytes is not None:
         # ---------------------------------------------------------------------
         # 1. PRIMARY RESULT CARD: WHITE TEXT ON PURE BLACK BACKGROUND
         # ---------------------------------------------------------------------
+        badges = []
         if is_document:
-            status_html = '<span class="status-badge-doc">📄 REFERENCE SPECIFICATION CATALOG SHEET</span>'
+            badges.append('<span class="status-badge-doc">📄 REFERENCE SPECIFICATION CATALOG SHEET</span>')
             card_title = "MASTER REFERENCE SPECIFICATION SHEET"
         elif is_valid:
-            status_html = '<span class="status-badge-valid">✓ VALID CENTRALIZED IMPLEMENT CODE</span>'
+            badges.append('<span class="status-badge-valid">✓ VALID CENTRALIZED IMPLEMENT CODE</span>')
             card_title = "IDENTIFIED STENCIL CODE / NUMBER"
         else:
-            status_html = '<span class="status-badge-pending">ℹ RAW / UNSTRUCTURED TEXT</span>'
+            badges.append('<span class="status-badge-pending">ℹ RAW / UNSTRUCTURED TEXT</span>')
             card_title = "IDENTIFIED TEXT"
+
+        if result.get("is_mirrored"):
+            badges.append('<span class="status-badge-pending" style="margin-left: 8px;">🪞 BACK-SIDE MIRRORED SCAN</span>')
+        if result.get("best_angle", 0) != 0:
+            badges.append(f'<span class="status-badge-doc" style="margin-left: 8px;">🔄 ROTATED {result["best_angle"]}°</span>')
+
+        status_html = " ".join(badges)
 
         st.markdown(f"""
         <div class="readout-card">
@@ -287,8 +300,13 @@ if image_bytes is not None:
         """, unsafe_allow_html=True)
 
         # Quick copy code block
-        st.caption("📋 Click the copy icon in the top-right corner to copy the detected number:")
+        st.caption(f"📋 Click the copy icon in the top-right corner to copy the detected number ({elapsed_ms} ms):")
         st.code(final_code, language="text")
+
+        # Multi-code stacked implements alert
+        all_codes = parsed.get("all_codes", [])
+        if len(all_codes) > 1:
+            st.info(f"**Multi-Part Stacked Implement Alert:** Found {len(all_codes)} distinct implement codes in this frame: " + " | ".join([f"`{c}`" for c in all_codes]))
 
         # ---------------------------------------------------------------------
         # 2. HIGH-CONTRAST DIGITAL STENCIL BADGE & CUTOUT (WHITE ON BLACK)

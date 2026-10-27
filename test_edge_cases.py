@@ -156,3 +156,143 @@ def test_real_dataset_images(engine):
             assert res["final_code"] == expected, f"Failed on {filepath}: got {res['final_code']}, expected {expected}"
             assert res["cropped_binary"] is not None
             assert res["digital_stamp"] is not None
+
+def test_stencil_bridge_normalization(engine):
+    # Stencil bridge cut gaps in model code (44G, IA4G, IN4G -> 446)
+    code1, _ = engine.normalize_code_from_lines(["GJ/142/44G/2026/12313/UP"])
+    assert code1 == "GJ/142/446/2026/12313/UP"
+
+    code2, _ = engine.normalize_code_from_lines(["GJ/142IA4G/2026/123137UP"])
+    assert code2 == "GJ/142/446/2026/12313/UP"
+
+    code3, _ = engine.normalize_code_from_lines(["GJ/142IN4GI2026I12313/LIP"])
+    assert code3 == "GJ/142/446/2026/12313/UP"
+
+    # Year normalization (202G -> 2026)
+    code4, _ = engine.normalize_code_from_lines(["GJ/142I44G/202G/12313/UP"])
+    assert code4 == "GJ/142/446/2026/12313/UP"
+
+    # Serial trailing digit preservation with suffix (11881/UP)
+    code5, _ = engine.normalize_code_from_lines(["GJ/142/446/2026/11881/UP"])
+    assert code5 == "GJ/142/446/2026/11881/UP"
+
+def test_mirrored_backside_detection(engine):
+    mirror_file = os.path.join("new ocr data", "WhatsApp Image 2026-10-27 at 4.02.15 PM.jpeg")
+    if os.path.exists(mirror_file):
+        res = engine.process_image(mirror_file)
+        assert res["final_code"] == "GJ/142/446/2026/11541"
+        assert res["is_mirrored"] is True
+        assert res["parsed_info"]["is_valid"] is True
+
+def test_digital_stamp_none_model_info(engine):
+    # Ensure no AttributeError when model_info is None
+    parsed = {
+        "full_code": "GJ/142/9999/2026/12345",
+        "state_code": "GJ",
+        "state_name": "Gujarat",
+        "mfr_code": "142",
+        "model_code": "9999",
+        "model_info": None,
+        "year": "2026",
+        "serial_no": "12345",
+        "suffix": "",
+        "is_valid": True
+    }
+    stamp = engine.generate_digital_stamp("GJ/142/9999/2026/12345", parsed)
+    assert stamp is not None
+    assert stamp.shape == (200, 800, 3)
+
+def test_all_new_dataset_samples(engine):
+    new_samples = {
+        os.path.join("new ocr data", "WhatsApp Image 2026-10-27 at 4.02.09 PM (1).jpeg"): "GJ/142/446/2026/12313/UP",
+        os.path.join("new ocr data", "WhatsApp Image 2026-10-27 at 4.02.09 PM (2).jpeg"): "GJ/142/446/2026/12313/UP",
+        os.path.join("new ocr data", "WhatsApp Image 2026-10-27 at 4.02.09 PM.jpeg"): "GJ/142/446/2026/12313/UP",
+        os.path.join("new ocr data", "WhatsApp Image 2026-10-27 at 4.02.10 PM.jpeg"): "GJ/142/446/2026/12313/UP",
+        os.path.join("new ocr data", "WhatsApp Image 2026-10-27 at 4.02.11 PM (1).jpeg"): "GJ/142/445/2026/44579",
+        os.path.join("new ocr data", "WhatsApp Image 2026-10-27 at 4.02.11 PM.jpeg"): "GJ/142/446/2026/12313/UP",
+        os.path.join("new ocr data", "WhatsApp Image 2026-10-27 at 4.02.14 PM (1).jpeg"): "GJ/142/445/2026/44579",
+        os.path.join("new ocr data", "WhatsApp Image 2026-10-27 at 4.02.14 PM.jpeg"): "GJ/142/445/2026/44579",
+        os.path.join("new ocr data", "WhatsApp Image 2026-10-27 at 4.02.15 PM (1).jpeg"): "GJ/142/446/2026/12733/UP",
+        os.path.join("new ocr data", "WhatsApp Image 2026-10-27 at 4.02.15 PM.jpeg"): "GJ/142/446/2026/11541",
+        os.path.join("new ocr data", "WhatsApp Image 2026-10-27 at 4.02.16 PM (1).jpeg"): "GJ/142/3674/2026/10800",
+        os.path.join("new ocr data", "WhatsApp Image 2026-10-27 at 4.02.16 PM.jpeg"): "GJ/142/446/2026/12733/UP",
+        os.path.join("new ocr data", "WhatsApp Image 2026-10-27 at 4.02.17 PM.jpeg"): "GJ/142/3674/2026/10801",
+    }
+    for filepath, expected in new_samples.items():
+        if os.path.exists(filepath):
+            res = engine.process_image(filepath)
+            assert res["final_code"] == expected, f"Failed on {filepath}: got {res['final_code']}, expected {expected}"
+            assert res["parsed_info"]["is_valid"] is True
+
+def test_tokens_with_spaces_and_stray_symbols(engine):
+    # Spaces around slashes and intra-character gaps
+    code1, info1 = engine.normalize_code_from_lines(["GJ / 142 / 446 / 2026 / 12313 / UP"])
+    assert code1 == "GJ/142/446/2026/12313/UP"
+    assert info1["is_valid"] is True
+
+    # Stray plus and bridged chars
+    code2, info2 = engine.normalize_code_from_lines(["GJ/14+2/4+4+/202/12733/UP"])
+    assert code2 == "GJ/142/446/2026/12733/UP"
+    assert info2["is_valid"] is True
+
+def test_serial_ghost_digit_recovery(engine):
+    # 6-digit serial with split 8 ('38' or '83')
+    assert engine._normalize_serial("118381") == "11881"
+    assert engine._normalize_serial("118831") == "11881"
+    # Leading 1 from slash misread
+    assert engine._normalize_serial("112313") == "12313"
+    # Normal 5-digit serial
+    assert engine._normalize_serial("44579") == "44579"
+
+def test_manufacturer_bridge_recovery(engine):
+    # Bridged 4 in mfr code (1A2 -> 142)
+    code, info = engine.normalize_code_from_lines(["GJ/1A2/AA.G/202/12313/UP"])
+    assert code == "GJ/142/446/2026/12313/UP"
+    assert info["mfr_code"] == "142"
+
+def test_model_bridge_aliases(engine):
+    assert engine._normalize_model("AAG") == "446"
+    assert engine._normalize_model("4AC") == "446"
+    assert engine._normalize_model("4AF") == "446"
+    assert engine._normalize_model("AAF") == "446"
+    assert engine._normalize_model("NAG") == "446"
+    assert engine._normalize_model("M4F") == "446"
+    assert engine._normalize_model("4++") == "446"
+    assert engine._normalize_model("44") == "446"
+
+def test_photometric_quality_analysis(engine):
+    # Black/dark image
+    dark_img = np.zeros((200, 400, 3), dtype=np.uint8)
+    q_dark = engine.analyze_lighting(dark_img)
+    assert q_dark["is_low_light"] is True
+    assert q_dark["needs_enhancement"] is True
+
+    # Overexposed/glare image
+    glare_img = np.full((200, 400, 3), 245, dtype=np.uint8)
+    q_glare = engine.analyze_lighting(glare_img)
+    assert q_glare["is_glare"] is True
+    assert q_glare["needs_enhancement"] is True
+
+def test_stress_conditions_resilience(engine):
+    # Test sample with low-light, harsh glare, and blur
+    img_path = "WhatsApp Image 2026-10-22 at 4.55.31 PM.jpeg"
+    if os.path.exists(img_path):
+        img = cv2.imread(img_path)
+        expected = "GJ/142/446/2026/11881/UP"
+
+        # 1. Low light (alpha=0.35, beta=-10)
+        dark = cv2.convertScaleAbs(img, alpha=0.35, beta=-10)
+        res_dark = engine.process_image(dark)
+        assert res_dark["final_code"] == expected, f"Dark failed: got {res_dark['final_code']}"
+
+        # 2. Harsh Glare (alpha=1.65, beta=40)
+        bright = cv2.convertScaleAbs(img, alpha=1.65, beta=40)
+        res_bright = engine.process_image(bright)
+        assert res_bright["final_code"] == expected, f"Glare failed: got {res_bright['final_code']}"
+
+        # 3. Blur (Gaussian blur 5x5)
+        blur = cv2.GaussianBlur(img, (5, 5), 1.2)
+        res_blur = engine.process_image(blur)
+        assert res_blur["final_code"] == expected, f"Blur failed: got {res_blur['final_code']}"
+
+

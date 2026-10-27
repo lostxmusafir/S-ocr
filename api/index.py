@@ -112,6 +112,7 @@ def process_ocr():
             "final_code": result.get("final_code", ""),
             "parsed_info": result.get("parsed_info", {}),
             "best_angle": result.get("best_angle", 0),
+            "is_mirrored": result.get("is_mirrored", False),
             "elapsed_ms": elapsed_ms,
             "raw_detections": result.get("raw_detections", []),
             "cropped_binary_base64": f"data:image/png;base64,{cropped_bin_b64}" if cropped_bin_b64 else None,
