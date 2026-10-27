@@ -2,7 +2,7 @@
 
 An industrial vision OCR application and web service built for detecting, deskewing, binarizing, and recognizing laser-cut stencil codes on sheet metal parts, tubes, brackets, and agricultural implements.
 
-🌐 **Live Vercel Production Web App**: [https://raj-ai-ocr.vercel.app](https://raj-ai-ocr.vercel.app)  
+🌐 **Live Vercel Production Web App**: [https://s-ocr.vercel.app](https://s-ocr.vercel.app)  
 📦 **GitHub Repository**: [https://github.com/lostxmusafir/S-ocr.git](https://github.com/lostxmusafir/S-ocr.git)
 
 ---
@@ -11,8 +11,8 @@ An industrial vision OCR application and web service built for detecting, deskew
 
 | Interface | URL / Method | Description |
 |---|---|---|
-| **Vercel Web App (Live)** | [https://raj-ai-ocr.vercel.app](https://raj-ai-ocr.vercel.app) | Responsive dark industrial web UI with camera scan, upload, sample testing, and high-contrast white-on-black cards. |
-| **Vercel Cloud API** | `POST https://raj-ai-ocr.vercel.app/api/ocr` | Serverless Python REST API for laser-cut stencil code identification. |
+| **Vercel Web App (Live)** | [https://s-ocr.vercel.app](https://s-ocr.vercel.app) | Responsive dark industrial web UI with camera scan, upload, sample testing, and high-contrast white-on-black cards. |
+| **Vercel Cloud API** | `POST https://s-ocr.vercel.app/api/ocr` | Serverless Python REST API for laser-cut stencil code identification. |
 | **Local Streamlit App** | Double-click `run_app.bat` or `http://localhost:8501` | Full interactive desktop dashboard with live camera input and deep analytics. |
 
 ---
@@ -55,12 +55,12 @@ An industrial vision OCR application and web service built for detecting, deskew
 
 ### 1. Health Check
 ```bash
-curl https://raj-ai-ocr.vercel.app/api/health
+curl https://s-ocr.vercel.app/api/health
 ```
 
 ### 2. Recognize Stencil Code from Image
 ```bash
-curl -X POST -F "file=@part_photo.jpg" https://raj-ai-ocr.vercel.app/api/ocr
+curl -X POST -F "file=@part_photo.jpg" https://s-ocr.vercel.app/api/ocr
 ```
 
 Response JSON:
