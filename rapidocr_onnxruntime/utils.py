@@ -22,8 +22,11 @@ class OrtInferSession():
     def __init__(self, config):
         sess_opt = SessionOptions()
         sess_opt.log_severity_level = 4
-        sess_opt.enable_cpu_mem_arena = False
+        sess_opt.enable_cpu_mem_arena = True
         sess_opt.graph_optimization_level = GraphOptimizationLevel.ORT_ENABLE_ALL
+        import os
+        sess_opt.intra_op_num_threads = min(8, os.cpu_count() or 4)
+        sess_opt.inter_op_num_threads = 1
 
         cpu_ep = 'CPUExecutionProvider'
         cpu_provider_options = {

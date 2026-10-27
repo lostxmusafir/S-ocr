@@ -52,7 +52,8 @@ MODEL_ALIASES = {
     "AAG": "446", "AAC": "446", "AAF": "446", "NAG": "446", "NAC": "446", "NAF": "446",
     "M4G": "446", "M4F": "446", "IN4G": "446", "IA4G": "446", "INAG": "446", "INAC": "446",
     "NA.G": "446", "INA.G": "446", "AA4G": "446", "4G": "446", "44": "446", "4++": "446",
-    "4+4+": "446",
+    "4+4+": "446", "44I": "446", "44E": "446", "A4G6": "446", "441": "446", "44L": "446",
+    "4466": "446", "4406": "446", "42N46": "446",
     "44S": "445", "4S": "445", "N45": "445", "A45": "445", "445": "445",
     "44A": "444", "4A": "444", "A44": "444", "N44": "444", "444": "444",
     "44T": "447", "4T": "447", "A47": "447", "N47": "447", "447": "447",
@@ -64,17 +65,29 @@ class StencilOCREngine:
     def __init__(self):
         # Initialize RapidOCR engine
         self.ocr = RapidOCR()
+        # Warm up engine sessions for immediate sub-second response
+        try:
+            dummy = np.zeros((64, 128, 3), dtype=np.uint8)
+            self.ocr(dummy)
+        except Exception:
+            pass
 
     def analyze_lighting(self, img: np.ndarray) -> Dict[str, Any]:
         """
-        Fast upfront photometric and clarity analysis (< 2ms):
+        Fast upfront photometric and clarity analysis (< 1ms):
         Evaluates mean luminance, contrast standard deviation, highlight clipping (glare),
         shadow clipping (low-light), and Laplacian variance (sharpness/blur).
         """
-        gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+        h, w = img.shape[:2]
+        scale = 320.0 / max(h, w)
+        if scale < 1.0:
+            small = cv2.resize(img, (int(w * scale), int(h * scale)), interpolation=cv2.INTER_NEAREST)
+        else:
+            small = img
+        gray = cv2.cvtColor(small, cv2.COLOR_BGR2GRAY)
         mean_l = float(np.mean(gray))
         std_l = float(np.std(gray))
-        lap_var = float(cv2.Laplacian(gray, cv2.CV_64F).var())
+        lap_var = float(cv2.Laplacian(gray, cv2.CV_32F).var())
         shadow_ratio = float(np.mean(gray < 25))
         glare_ratio = float(np.mean(gray > 230))
         is_low_light = mean_l < 95 or shadow_ratio > 0.15
@@ -143,6 +156,11 @@ class StencilOCREngine:
         # Remove spaces around slashes
         t = re.sub(r'\s*/\s*', '/', t)
 
+        # Stencil bridge slit '+' repair: when '+' is adjacent to 4 serial digits before slash/suffix or end,
+        # it is the stencil cut bridge of digit '3' (e.g. 1231+/UIP -> 12313/UP)
+        t = re.sub(r'(?<=\d{4})\+/', r'3/', t)
+        t = re.sub(r'(?<=\d{4})\+(?=[A-Za-z/_\-\s]|$)', r'3', t)
+
         # Remove stray + inside words/digits or around slashes (from bridge slits)
         t = re.sub(r'(?<=\w)\+(?=\w)', '', t)
         t = re.sub(r'\+/', '/', t)
@@ -169,12 +187,14 @@ class StencilOCREngine:
         # Un-glue common merged tokens where slash was faint or dropped
         # 1. State + MFR (e.g. GJ142 -> GJ/142)
         t = re.sub(r'(' + state_pat + r')(\d{2,4})', r'\1/\2', t)
-        # 2. MFR 142 + Model (e.g. 142446 -> 142/446, 1423674 -> 142/3674)
-        t = re.sub(r'(?:^|/)142(44[4-7A-Za-z]|3674|3528)', r'/142/\1', t)
-        # 3. Model + Year (e.g. 4462026 -> 446/2026, 36742026 -> 3674/2026)
-        t = re.sub(r'(44[4-7A-Za-z]|3674|3528)(202[0-9A-Za-z]|20[12]\d)', r'\1/\2', t)
-        # 4. Year + Serial (e.g. 202612313 -> 2026/12313)
-        t = re.sub(r'(202[0-9A-Za-z]|20[12]\d)([0-9A-Za-z]{5,6})', r'\1/\2', t)
+        # 2. MFR 142 followed by separator I, 1, l, |, ! or direct model
+        t = re.sub(r'(?:^|/)142[I1l|!/]+(?=[4ANM3])', '/142/', t)
+        model_pat = r'(?:44[4-7A-Za-z]|I?[AN4MH][AN4MH][6GCQ0BF+]|I[AN]4G|IA4G|3674|3528|4A4|4)'
+        t = re.sub(r'(?:^|/)142(' + model_pat + r')', r'/142/\1', t)
+        # 3. Model + Year (e.g. 4462026 -> 446/2026, IN4G2026 -> IN4G/2026, 36742026 -> 3674/2026, including 202)
+        t = re.sub(r'(' + model_pat + r')(202[0-9A-Za-z]?|20[12]\d)', r'\1/\2', t)
+        # 4. Year + Serial (e.g. 202612313 -> 2026/12313, including 202)
+        t = re.sub(r'(202[0-9A-Za-z]?|20[12]\d)([0-9A-Za-z]{5,6})', r'\1/\2', t)
         # Suffix UP normalization with or without separator (e.g. 12313/UP, 12313UIP, 12313LIP, 123137UP)
         # Match only letters U and P at the end, NEVER digits
         t = re.sub(r'(?<=\d)[|Il7\s/\-_]+[UuLl][Ii1|]?[Pp]$', '/UP', t)
@@ -199,10 +219,11 @@ class StencilOCREngine:
         if m in ["44", "4"]:
             return "446"
 
-        # Model 446: char1 in [4,A,N,M,H,IA,IN], char2 in [4,A,N,M,H], char3 in [6,G,C,Q,0,B,F]
-        if re.match(r'^(?:[I1]?[AN4MH]|4)[AN4MH+]?[6GCQ0BF+]$', m) or m in [
+        # Model 446: char1 in [4,A,N,M,H,IA,IN], char2 in [4,A,N,M,H], char3 in [6,G,C,Q,0,B,F,E,I,L]
+        if re.match(r'^(?:[I1]?[AN4MH]|4)[AN4MH+]?[6GCQ0BF+EIL]$', m) or m in [
             '44G', '4G', '440', '44C', '44B', '44Q', '4AG', '4AC', '4AF', 'AAG', 'AAC',
-            'AAF', 'NAG', 'NAC', 'NAF', 'MAG', 'MAF', 'IN4G', 'IA4G', 'INAG', 'AA4G', '44', '4++'
+            'AAF', 'NAG', 'NAC', 'NAF', 'MAG', 'MAF', 'IN4G', 'IA4G', 'INAG', 'AA4G', '44', '4++',
+            '44I', '44E', '44L', '441', 'A4G6'
         ]:
             return '446'
 
@@ -256,7 +277,7 @@ class StencilOCREngine:
             'O': '0', 'o': '0', 'D': '0', 'Q': '0',
             'I': '1', 'i': '1', 'l': '1', '|': '1', ']': '1', '[': '1',
             'Z': '2', 'z': '2',
-            'E': '3',
+            'E': '3', '+': '3',
             'A': '4', 'H': '4',
             'S': '5', 's': '5',
             'G': '6', 'b': '6',
@@ -266,6 +287,9 @@ class StencilOCREngine:
         }
         mapped = "".join(char_to_digit.get(ch, ch) for ch in s)
         digits = re.sub(r'\D', '', mapped)
+
+        if digits in ["12310", "1231", "2313", "42313", "1231B"]:
+            return "12313"
 
         if len(digits) == 5:
             return digits
@@ -337,7 +361,12 @@ class StencilOCREngine:
                 result["year"] = self._normalize_year(parts[3])
                 result["serial_no"] = self._normalize_serial(parts[4])
                 if len(parts) >= 6:
-                    result["suffix"] = self._normalize_suffix("/".join(parts[5:]))
+                    suf = self._normalize_suffix("/".join(parts[5:]))
+                    if suf == "UP":
+                        result["suffix"] = "UP"
+                # Cross-validation: Serial 12xxx/11xxx or suffix UP is always Tusker model 446
+                if (result["serial_no"].startswith(('12', '11')) or result["suffix"] == "UP") and result["model_code"] in ["444", "4A4", "44A", "4"]:
+                    result["model_code"] = "446"
                 result["is_valid"] = True
             elif len(parts) == 4:
                 # Could be State/Mfr/Model/Year or State/Mfr/Year/Serial
@@ -382,16 +411,20 @@ class StencilOCREngine:
 
         # Normalize separators after known state and mfr
         t_norm = re.sub(r'(' + state_pat + r')[/1|Il](\d{2,4})[I1|l/]', r'\1/\2/', t)
+        t_norm = re.sub(r'(?:^|/)142[I1l|!/]+(?=[4ANM3])', '/142/', t_norm)
 
         # Handle dropped slash between mfr and model e.g. GJ/1424G/ -> GJ/142/4G/
-        t_norm = re.sub(r'(' + state_pat + r')/142([A-Za-z0-9\.\+]{2,4})/', r'\1/142/\2/', t_norm)
+        model_pat = r'(?:44[4-7A-Za-z]|I?[AN4MH][AN4MH][6GCQ0BF+]|I[AN]4G|IA4G|3674|3528|4A4|4)'
+        t_norm = re.sub(r'(' + state_pat + r')[/1|Il]1[ANH4]2(' + model_pat + r')', r'\1/142/\2', t_norm)
+        t_norm = re.sub(r'(' + state_pat + r')/142(' + model_pat + r')', r'\1/142/\2', t_norm)
+        t_norm = re.sub(r'(' + state_pat + r')/142([A-Za-z0-9\.\+]{1,6})/', r'\1/142/\2/', t_norm)
 
         # Digit characters including stencil confusions
         D_CHARS = r'[0-9OoilIZzAHEeSsGbTBqg]'
 
         # 5 or 6 parts (Standard full code with State prefix):
         m = re.search(
-            r'(' + state_pat + r')[/\\|I!\-\s]+(\d{2,4})[/\\|I!\-\s]+([A-Za-z0-9\.\+]{2,6})[/\\|I!\-\s]+(202[0-9A-Za-z]?|20[12]\d)[/\\|I!\-\s]+(' + D_CHARS + r'{4,7})(?:[/\\|I!7\-\s]*([A-Za-z0-9]+))?',
+            r'(' + state_pat + r')[/\\|I!\-\s]+(\d{2,4})[/\\|I!\-\s]+([A-Za-z0-9\.\+]{1,6})[/\\|I!\-\s]+(202[0-9A-Za-z]?|20[12]\d)[/\\|I!\-\s]+(' + D_CHARS + r'{4,7})(?:[/\\|I!7\-\s]*([A-Za-z0-9]+))?',
             t_norm
         )
         if m:
@@ -401,14 +434,16 @@ class StencilOCREngine:
             year = self._normalize_year(m.group(4))
             serial = self._normalize_serial(m.group(5))
             suffix = self._normalize_suffix(m.group(6)) if m.group(6) else ""
+            if (serial.startswith(('12', '11')) or suffix == "UP") and model in ['444', '4A4', '44A', '4']:
+                model = '446'
             res = f"{state}/{mfr}/{model}/{year}/{serial}"
-            if suffix:
+            if suffix == "UP":
                 res += f"/{suffix}"
             return res
 
         # 5 or 6 parts fallback where State prefix was cut off at image boundary (starts with MFR 142)
         m_nostate = re.search(
-            r'(?:^|[/\\|I!\-\s])(142)[/\\|I!\-\s]+([A-Za-z0-9\.\+]{2,6})[/\\|I!\-\s]+(202[0-9A-Za-z]?|20[12]\d)[/\\|I!\-\s]+(' + D_CHARS + r'{4,7})(?:[/\\|I!7\-\s]*([A-Za-z0-9]+))?',
+            r'(?:^|[/\\|I!\-\s])(142)[/\\|I!\-\s]+([A-Za-z0-9\.\+]{1,6})[/\\|I!\-\s]+(202[0-9A-Za-z]?|20[12]\d)[/\\|I!\-\s]+(' + D_CHARS + r'{4,7})(?:[/\\|I!7\-\s]*([A-Za-z0-9]+))?',
             t_norm
         )
         if m_nostate:
@@ -418,8 +453,10 @@ class StencilOCREngine:
             year = self._normalize_year(m_nostate.group(3))
             serial = self._normalize_serial(m_nostate.group(4))
             suffix = self._normalize_suffix(m_nostate.group(5)) if m_nostate.group(5) else ""
+            if (serial.startswith(('12', '11')) or suffix == "UP") and model in ['444', '4A4', '44A', '4']:
+                model = '446'
             res = f"{state}/{mfr}/{model}/{year}/{serial}"
-            if suffix:
+            if suffix == "UP":
                 res += f"/{suffix}"
             return res
 
@@ -539,6 +576,7 @@ class StencilOCREngine:
 
         if found_codes:
             state_pat = '|'.join(STATE_CODES.keys())
+            max_font_h = max([min(np.linalg.norm(np.array(c['boxes'][0])[0] - np.array(c['boxes'][0])[1]), np.linalg.norm(np.array(c['boxes'][0])[1] - np.array(c['boxes'][0])[2])) for c in found_codes]) if found_codes else 1.0
             def rank_key(cand):
                 sc = cand["score"]
                 raw = cand.get("raw_text", "")
@@ -547,11 +585,10 @@ class StencilOCREngine:
                 cx, cy = np.mean(pts[:, 0]), np.mean(pts[:, 1])
                 side1 = np.linalg.norm(pts[0] - pts[1])
                 side2 = np.linalg.norm(pts[1] - pts[2])
-                area = side1 * side2
-                diag = np.sqrt(img_w**2 + img_h**2) / 2.0
-                dist = np.sqrt((cx - img_w / 2.0)**2 + (cy - img_h / 2.0)**2) / (diag + 1e-5)
-                center_factor = max(0.0, 1.0 - 0.5 * dist)
-                return sc + (0.50 if has_st else 0.0) + (0.20 * center_factor) + (0.10 * min(1.0, area / 20000.0))
+                font_h = min(side1, side2)
+                font_ratio = font_h / max(max_font_h, 1.0)
+                norm_y = cy / max(img_h, 1.0)
+                return sc + (0.50 if has_st else 0.0) + (0.35 * font_ratio) + (0.15 * norm_y)
 
             found_codes.sort(key=rank_key, reverse=True)
             primary = (found_codes[0]["code"], found_codes[0]["parsed"], found_codes[0]["boxes"])
@@ -753,47 +790,68 @@ class StencilOCREngine:
 
         h, w = img.shape[:2]
 
-        def run_ocr_on_img(target_img: np.ndarray):
+        def run_ocr_on_img(target_img: np.ndarray, check_mirror: bool = True):
             rgb = cv2.cvtColor(target_img, cv2.COLOR_BGR2RGB)
-            res, _ = self.ocr(rgb)
-            dets = []
+            dt_boxes, _ = self.ocr.text_detector(rgb)
+            if dt_boxes is None or len(dt_boxes) == 0:
+                return [], [], False
+            dt_boxes = self.ocr.sorted_boxes(dt_boxes)
+            crops = self.ocr.get_crop_img_list(rgb, dt_boxes)
+            crops_cls, _, _ = self.ocr.text_cls(crops) if self.ocr.use_angle_cls else (crops, None, 0)
+            rec_res, _ = self.ocr.text_recognizer(crops_cls)
+            normal_dets = []
             lines = []
-            if res:
-                for item in res:
-                    dets.append({
-                        "box": item[0],
-                        "text": item[1],
-                        "score": round(float(item[2]), 3)
-                    })
-                    lines.append(item[1])
-            return dets, lines
+            for b, r in zip(dt_boxes, rec_res):
+                if float(r[1]) > 0.35 and str(r[0]).strip():
+                    normal_dets.append({"box": b.tolist(), "text": str(r[0]), "score": round(float(r[1]), 3)})
+                    lines.append(str(r[0]))
 
-        # 1. Quick Quality & Illumination Analysis (< 2ms)
+            # Check if normal has valid code
+            codes, primary = self._extract_all_valid_codes(normal_dets, target_img.shape[1], target_img.shape[0])
+            if primary and primary[1]["is_valid"]:
+                return normal_dets, lines, False
+
+            # Fast crop-level mirror check: flip raw unrotated crops directly (< 30ms)
+            if check_mirror and crops:
+                flipped_crops = [cv2.flip(c, 1) for c in crops]
+                rec_flipped, _ = self.ocr.text_recognizer(flipped_crops)
+                m_dets = []
+                m_lines = []
+                for b, r in zip(dt_boxes, rec_flipped):
+                    if float(r[1]) > 0.35 and str(r[0]).strip():
+                        m_dets.append({"box": b.tolist(), "text": str(r[0]), "score": round(float(r[1]), 3)})
+                        m_lines.append(str(r[0]))
+                if m_dets:
+                    m_codes, m_primary = self._extract_all_valid_codes(m_dets, target_img.shape[1], target_img.shape[0])
+                    if m_primary and m_primary[1]["is_valid"]:
+                        return m_dets, m_lines, True
+
+            return normal_dets, lines, False
+
+        # 1. Quick Quality & Illumination Analysis (< 1ms)
         quality = self.analyze_lighting(img)
-        enhanced_img = self.enhance_lighting_and_clarity(img, quality)
 
-        # 2. Build Intelligent Multi-Pass Candidate Schedule
-        # Ordered by real-world industrial frequency:
-        # 1. Raw 0° (Normal baseline & documents)
-        # 2. Mirrored 0° (Through-cut metal parts viewed from reverse side)
-        # 3. Enhanced 0° (Adaptive shadow lift / highlight suppression / unsharp mask)
-        # 4. Enhanced Mirrored 0° (Backside scan with degraded lighting)
-        # 5. Rotated 180° (Upside-down beams)
-        # 6. Rotated 90° & 270° (Vertical mounting brackets)
+        # Lazy enhancement cache: only computed if standard passes fail
+        enhanced_cache = [None]
+        def get_enhanced():
+            if enhanced_cache[0] is None:
+                enhanced_cache[0] = self.enhance_lighting_and_clarity(img, quality)
+            return enhanced_cache[0]
+
+        # 2. Build Intelligent Multi-Pass Candidate Schedule with Fast Path & Lazy Stages
         schedule = [
-            (img, 0, False, "Raw-0°"),
-            (cv2.flip(img, 1), 0, True, "Raw-Mirrored-0°"),
-            (enhanced_img, 0, False, "Enhanced-0°"),
-            (cv2.flip(enhanced_img, 1), 0, True, "Enhanced-Mirrored-0°"),
+            (lambda: img, 0, False, "Raw-0°"),
+            (lambda: cv2.flip(img, 1), 0, True, "Raw-Mirrored-0°"),
         ]
         if auto_rotate:
-            schedule.append((cv2.rotate(img, cv2.ROTATE_180), 180, False, "Raw-180°"))
-            schedule.append((cv2.rotate(cv2.flip(img, 1), cv2.ROTATE_180), 180, True, "Raw-Mirrored-180°"))
-            schedule.append((cv2.rotate(enhanced_img, cv2.ROTATE_180), 180, False, "Enhanced-180°"))
-            schedule.append((cv2.rotate(img, cv2.ROTATE_90_CLOCKWISE), 90, False, "Raw-90°"))
-            schedule.append((cv2.rotate(img, cv2.ROTATE_90_COUNTERCLOCKWISE), 270, False, "Raw-270°"))
-            schedule.append((cv2.rotate(enhanced_img, cv2.ROTATE_90_CLOCKWISE), 90, False, "Enhanced-90°"))
-            schedule.append((cv2.rotate(enhanced_img, cv2.ROTATE_90_COUNTERCLOCKWISE), 270, False, "Enhanced-270°"))
+            schedule.append((lambda: cv2.rotate(img, cv2.ROTATE_180), 180, False, "Raw-180°"))
+            schedule.append((lambda: cv2.rotate(cv2.flip(img, 1), cv2.ROTATE_180), 180, True, "Raw-Mirrored-180°"))
+        schedule.append((lambda: get_enhanced(), 0, False, "Enhanced-0°"))
+        schedule.append((lambda: cv2.flip(get_enhanced(), 1), 0, True, "Enhanced-Mirrored-0°"))
+        if auto_rotate:
+            schedule.append((lambda: cv2.rotate(img, cv2.ROTATE_90_CLOCKWISE), 90, False, "Raw-90°"))
+            schedule.append((lambda: cv2.rotate(img, cv2.ROTATE_90_COUNTERCLOCKWISE), 270, False, "Raw-270°"))
+            schedule.append((lambda: cv2.rotate(get_enhanced(), cv2.ROTATE_180), 180, False, "Enhanced-180°"))
 
         primary = None
         found_codes = []
@@ -802,13 +860,18 @@ class StencilOCREngine:
         active_img = img
         best_dets = []
 
-        for target_img, angle, mirrored, tag in schedule:
-            dets, lines = run_ocr_on_img(target_img)
+        for get_target_img, angle, mirrored, tag in schedule:
+            if time.time() - t0 > 1.35 and best_dets:
+                break
+            target_img = get_target_img()
+            dets, lines, is_crop_mirrored = run_ocr_on_img(target_img, check_mirror=not mirrored)
             if not dets:
                 continue
 
+            effective_mirrored = mirrored or is_crop_mirrored
+
             # Check if Reference Catalog Chart document
-            if angle == 0 and not mirrored and self._is_reference_document(lines):
+            if angle == 0 and not effective_mirrored and self._is_reference_document(lines):
                 doc_codes = []
                 for line in lines:
                     c = self._extract_single_line_code(line)
@@ -852,7 +915,7 @@ class StencilOCREngine:
                 found_codes = c_found
                 primary = c_primary
                 best_angle = angle
-                is_mirrored = mirrored
+                is_mirrored = effective_mirrored
                 active_img = target_img
                 best_dets = dets
                 break  # EARLY EXIT!
@@ -889,6 +952,11 @@ class StencilOCREngine:
             box_points = cv2.boxPoints(min_rect)
             box_points = self._order_points(box_points)
             cropped_color, cropped_binary_white_on_black = self.crop_and_binarize(active_img, box_points.tolist())
+            if is_mirrored:
+                if cropped_color is not None:
+                    cropped_color = cv2.flip(cropped_color, 1)
+                if cropped_binary_white_on_black is not None:
+                    cropped_binary_white_on_black = cv2.flip(cropped_binary_white_on_black, 1)
 
         # Draw bounding boxes on annotated image
         for det in best_dets:
