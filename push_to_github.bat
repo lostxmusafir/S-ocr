@@ -1,7 +1,7 @@
 @echo off
-title Push to GitHub: lostxmusafir/raj-ai-ocr-
+title Push to GitHub: lostxmusafir/S-ocr
 echo ============================================================
-echo Pushing commits to https://github.com/lostxmusafir/raj-ai-ocr-.git
+echo Pushing commits to https://github.com/lostxmusafir/S-ocr.git
 echo ============================================================
 echo.
 git push -u origin main

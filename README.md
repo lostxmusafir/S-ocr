@@ -3,7 +3,7 @@
 An industrial vision OCR application and web service built for detecting, deskewing, binarizing, and recognizing laser-cut stencil codes on sheet metal parts, tubes, brackets, and agricultural implements.
 
 🌐 **Live Vercel Production Web App**: [https://raj-ai-ocr.vercel.app](https://raj-ai-ocr.vercel.app)  
-📦 **GitHub Repository**: [https://github.com/lostxmusafir/raj-ai-ocr-.git](https://github.com/lostxmusafir/raj-ai-ocr-.git)
+📦 **GitHub Repository**: [https://github.com/lostxmusafir/S-ocr.git](https://github.com/lostxmusafir/S-ocr.git)
 
 ---
 
