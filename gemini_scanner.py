@@ -16,10 +16,10 @@ import cv2
 from typing import Dict, Any, Tuple, Optional, List
 
 SUPPORTED_VISION_MODELS = [
-    "gemini-2.5-flash",
     "gemini-3-flash-preview",
+    "gemini-2.5-flash",
     "gemini-3.5-flash-lite",
-    "gemini-3.5-flash",
+    "gemini-3.8-flash",
 ]
 
 # Canonical catalog of authorized models and states
@@ -156,6 +156,7 @@ class GeminiRoundRobinEngine:
 
         self.models = models or SUPPORTED_VISION_MODELS
         self._current_idx = 0
+        self._key_cooldowns: Dict[str, float] = {}
 
         # Optional local high-speed engine if installed
         self._local_engine = None
@@ -171,9 +172,19 @@ class GeminiRoundRobinEngine:
     def _next_key_info(self) -> Tuple[str, int]:
         if not self.api_keys:
             raise ValueError("No Gemini API Keys configured. Please set GEMINI_API_KEYS environment variable.")
-        idx = self._current_idx % len(self.api_keys)
+        now = time.time()
+        n = len(self.api_keys)
+        # 1. Look for a key that is not in 60s cooldown
+        for _ in range(n):
+            idx = self._current_idx % n
+            key = self.api_keys[idx]
+            self._current_idx = (self._current_idx + 1) % n
+            if self._key_cooldowns.get(key, 0) <= now:
+                return key, idx
+        # 2. If all keys are currently cooling down, fallback to round-robin
+        idx = self._current_idx % n
         key = self.api_keys[idx]
-        self._current_idx = (self._current_idx + 1) % len(self.api_keys)
+        self._current_idx = (self._current_idx + 1) % n
         return key, idx
 
     def _call_gemini_dual_view(self, img_bgr: np.ndarray, timeout: int = 12) -> Optional[str]:
@@ -245,6 +256,13 @@ class GeminiRoundRobinEngine:
                         if part_no:
                             return part_no
 
+                except urllib.error.HTTPError as e:
+                    if e.code == 429:
+                        # Rate limit hit: put key in 60s cooldown & immediately switch to NEXT key!
+                        self._key_cooldowns[key] = time.time() + 60
+                        break
+                    # If 404/503 on this specific model, try next model on this key
+                    continue
                 except Exception:
                     continue
 
