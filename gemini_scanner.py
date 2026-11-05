@@ -50,6 +50,24 @@ SUPPORTED_VISION_MODELS = [
     "gemini-3.8-flash",
 ]
 
+def load_dotenv_if_exists():
+    for env_path in [".env", os.path.join(os.path.dirname(os.path.abspath(__file__)), ".env")]:
+        if os.path.exists(env_path):
+            try:
+                with open(env_path, "r", encoding="utf-8") as f:
+                    for line in f:
+                        line = line.strip()
+                        if line and not line.startswith("#") and "=" in line:
+                            k, v = line.split("=", 1)
+                            k = k.strip()
+                            v = v.strip().strip('"').strip("'")
+                            if k and not os.environ.get(k):
+                                os.environ[k] = v
+            except Exception:
+                pass
+
+load_dotenv_if_exists()
+
 GEMINI_SYSTEM_PROMPT = """You are an expert industrial computer vision model specialized in reading laser-cut metal stencils, stamp codes, and serial markings on agricultural implements and sheet metal parts.
 
 The markings follow this standardized centralized pattern:
