@@ -1,6 +1,6 @@
 """
 Gemini Vision Round-Robin OCR Engine for Laser Cut Metal Stencils
-Uses Google Gemini Vision with 4-key round-robin rotation, automatic error failover,
+Uses Google Gemini Vision with multi-key round-robin rotation, automatic error failover,
 and industrial implement stencil parsing.
 """
 
@@ -43,14 +43,6 @@ STATE_CODES = {
     "OD": "Odisha",
     "WB": "West Bengal",
 }
-
-# 4 API Keys provided by user
-DEFAULT_GEMINI_KEYS = [
-    "AQ.Ab8RN6KWceXroDztcQYJDq2Pl9clzHf2wMWuN3N280aKNo6iPg",
-    "AQ.Ab8RN6KEM_dUJkWLuRH7Oa2dUA7Vh-_RyPW-7vRUE4iLy5nY1A",
-    "AQ.Ab8RN6LYJ5daRjNM73df-2mNvE5xFSVSuyb66oz9rZrbqfqxCQ",
-    "AQ.Ab8RN6LYJ5daRjNM73df-2mNvE5xFSVSuyb66oz9rZrbqfqxCQ",
-]
 
 # Vision models supported with automatic fallback
 SUPPORTED_VISION_MODELS = [
@@ -107,11 +99,20 @@ Output MUST be strictly valid JSON matching this schema:
 
 class GeminiRoundRobinEngine:
     def __init__(self, api_keys: Optional[List[str]] = None, models: Optional[List[str]] = None):
-        env_keys = os.environ.get("GEMINI_API_KEYS", "")
-        if env_keys:
-            self.api_keys = [k.strip() for k in env_keys.split(",") if k.strip()]
+        raw_env = (
+            os.environ.get("GEMINI_API_KEYS", "")
+            or os.environ.get("GEMINI_API_KEY", "")
+            or ""
+        )
+        if raw_env:
+            cleaned = []
+            for k in raw_env.split(","):
+                k = k.strip().strip('"').strip("'").strip()
+                if k:
+                    cleaned.append(k)
+            self.api_keys = cleaned if cleaned else list(api_keys or [])
         else:
-            self.api_keys = list(api_keys or DEFAULT_GEMINI_KEYS)
+            self.api_keys = list(api_keys or [])
 
         self.models = models or SUPPORTED_VISION_MODELS
         self._current_idx = 0
@@ -119,7 +120,7 @@ class GeminiRoundRobinEngine:
             "total_requests": 0,
             "success_count": 0,
             "failover_count": 0,
-            "key_usage": [0] * len(self.api_keys)
+            "key_usage": [0] * max(len(self.api_keys), 1)
         }
 
     def get_keys(self) -> List[str]:
@@ -132,6 +133,8 @@ class GeminiRoundRobinEngine:
             self._current_idx = 0
 
     def _next_key_info(self) -> Tuple[str, int]:
+        if not self.api_keys:
+            raise ValueError("No Gemini API Keys configured. Please set GEMINI_API_KEYS environment variable.")
         idx = self._current_idx % len(self.api_keys)
         key = self.api_keys[idx]
         self._current_idx = (self._current_idx + 1) % len(self.api_keys)
@@ -206,13 +209,18 @@ class GeminiRoundRobinEngine:
         t0 = time.time()
         self.stats["total_requests"] += 1
 
+        if not self.api_keys:
+            return {
+                "success": False,
+                "error": "No Gemini API keys configured. Set GEMINI_API_KEYS in Render/Vercel Environment Variables."
+            }
+
         # Normalize image input to numpy BGR
         img_bgr = None
 
         if isinstance(img_input, str):
             img_bgr = cv2.imread(img_input)
             if img_bgr is None:
-                # Handle Windows Unicode paths if needed
                 try:
                     with open(img_input, "rb") as f:
                         file_bytes = np.frombuffer(f.read(), np.uint8)
@@ -267,7 +275,11 @@ class GeminiRoundRobinEngine:
 
         # Round-robin loop with multi-model fallback
         for attempt in range(total_keys):
-            key, key_idx = self._next_key_info()
+            try:
+                key, key_idx = self._next_key_info()
+            except Exception as e:
+                last_error = e
+                break
 
             for model_name in self.models:
                 url = f"https://generativelanguage.googleapis.com/v1beta/models/{model_name}:generateContent?key={key}"
@@ -286,7 +298,8 @@ class GeminiRoundRobinEngine:
 
                         # Update metrics
                         self.stats["success_count"] += 1
-                        self.stats["key_usage"][key_idx] += 1
+                        if key_idx < len(self.stats["key_usage"]):
+                            self.stats["key_usage"][key_idx] += 1
 
                         # Extract fields
                         final_code = parsed_res.get("full_code", "").strip()
