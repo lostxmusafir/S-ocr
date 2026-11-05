@@ -1,9 +1,11 @@
 """
-Fast Gemini Vision Round-Robin OCR Engine for Laser Cut Metal Stencils.
-Optimized for high-speed, minimal latency, and simple PARTno output.
+Industrial Laser Cut Metal Stencil OCR Engine.
+Optimized for arbitrary orientations (0°, 90°, 180°, 270°), mirrored/backside through-cuts,
+bridge-font restoration, multi-key round-robin, and instant minimal PARTno response.
 """
 
 import os
+import re
 import json
 import time
 import base64
@@ -14,9 +16,36 @@ import cv2
 from typing import Dict, Any, Tuple, Optional, List
 
 SUPPORTED_VISION_MODELS = [
+    "gemini-2.5-flash",
+    "gemini-3-flash-preview",
+    "gemini-3.5-flash-lite",
     "gemini-3.5-flash",
-    "gemini-3.8-flash",
 ]
+
+# Canonical catalog of authorized models and states
+CATALOG_MODELS = {"444", "445", "446", "447", "3528", "3674"}
+
+VALID_STATES = {
+    "GJ", "MH", "MP", "RJ", "PB", "HR", "UP", "KA", "TN", "AP",
+    "TS", "DL", "UK", "BR", "JH", "OD", "WB", "GA", "CH", "HP"
+}
+
+MODEL_ALIASES = {
+    "44G": "446", "440": "446", "44Q": "446", "44C": "446", "44B": "446", "44F": "446",
+    "4AG": "446", "4AC": "446", "4AF": "446", "4A6": "446", "4A0": "446", "4AB": "446",
+    "N46": "446", "N4G": "446", "N4C": "446", "N4F": "446", "A46": "446", "A4G": "446",
+    "AAG": "446", "AAC": "446", "AAF": "446", "NAG": "446", "NAC": "446", "NAF": "446",
+    "M4G": "446", "M4F": "446", "IN4G": "446", "IA4G": "446", "INAG": "446", "INAC": "446",
+    "NA.G": "446", "INA.G": "446", "AA4G": "446", "4G": "446", "44": "446", "4++": "446",
+    "4+4+": "446", "44I": "446", "44E": "446", "A4G6": "446", "441": "446", "44L": "446",
+    "4466": "446", "4406": "446", "42N46": "446", "MA4G": "446", "NA4G": "446", "MA46": "446",
+    "NA46": "446", "4A4G": "446", "A44G": "446",
+    "44S": "445", "4S": "445", "N45": "445", "A45": "445",
+    "44A": "444", "4A": "444", "A44": "444", "N44": "444",
+    "44T": "447", "4T": "447", "A47": "447", "N47": "447",
+    "367A": "3674", "367N": "3674", "367H": "3674", "367": "3674",
+    "352B": "3528", "352": "3528",
+}
 
 def load_dotenv_if_exists():
     for env_path in [".env", os.path.join(os.path.dirname(os.path.abspath(__file__)), ".env")]:
@@ -36,16 +65,77 @@ def load_dotenv_if_exists():
 
 load_dotenv_if_exists()
 
-FAST_SYSTEM_PROMPT = """You are an OCR model for laser-cut metal stencils on agricultural implement parts.
-The stencil code follows: STATE/MFR/MODEL/YEAR/SERIAL[/SUFFIX]
-Examples:
-- GJ/142/446/2026/11881/UP
-- GJ/142/3674/2026/10652
-- GJ/142/445/2026/43889
-The metal part might be upside down (180deg), vertical (90/270deg), or mirrored.
-Return ONLY this exact JSON format:
+DUAL_VIEW_PROMPT = """You are an expert OCR model for laser-cut metal stencils on agricultural implement parts.
+You are provided TWO views of the metal part:
+- View 1: Original photo
+- View 2: Horizontally flipped photo (un-mirrored, in case View 1 was taken from the reverse side of a through-cut plate)
+
+The implement part number format: STATE/MFR/MODEL/YEAR/SERIAL[/SUFFIX]
+- STATE: 2-letter state code (GJ, MH, MP, RJ, PB, HR, UP, etc.)
+- MFR: 142
+- MODEL: Must be one of: 444, 445, 446, 447, 3528, 3674
+- YEAR: 4-digit year like 2024, 2025, 2026, 2027
+- SERIAL: 5-digit number like 11881, 11541, 12313, 44579, 10800, 10652
+- SUFFIX: Optional suffix like UP
+
+CRITICAL INSTRUCTIONS:
+1. One view is forward-readable (letters and numbers read normally, not backwards/mirrored). Compare View 1 and View 2 to find the forward-readable text.
+2. Read from any rotation angle (0°, 90°, 180°, 270°).
+3. If split across 2 lines (Line 1: GJ/142/3674, Line 2: 2026/10652), merge into a single code: GJ/142/3674/2026/10652.
+4. Return ONLY JSON format:
 {"PARTno": "GJ/142/446/2026/11881/UP"}
 """
+
+def normalize_stencil_code(raw_code: str) -> Tuple[str, bool]:
+    """
+    Cleans, fixes stencil bridges, and validates standard implement syntax.
+    Returns (cleaned_code, is_valid).
+    """
+    if not raw_code:
+        return "", False
+
+    code = raw_code.strip().replace(" ", "").replace("\\", "/").upper()
+    code = re.sub(r"[^A-Z0-9/]", "", code)
+
+    # Normalize state code bridges (e.g. CJ/ -> GJ/, CL/ -> GJ/)
+    if code.startswith(("CJ/", "CL/", "GU/")):
+        code = "GJ/" + code[3:]
+
+    # Remove accidental leading 1 from /12026 -> /2026
+    code = re.sub(r"/(1)(202[0-9])/", r"/\2/", code)
+
+    # Standard pattern: STATE/MFR/MODEL/YEAR/SERIAL(/SUFFIX)?
+    m = re.search(r"([A-Z]{2})/([0-9]{3})/([A-Z0-9]{2,5})/([0-9]{4})/([0-9]{5})(?:/([A-Z0-9]+))?", code)
+    if m:
+        state, mfr, model, year, serial, suffix = m.groups()
+        # Normalize model bridge aliases
+        if model in MODEL_ALIASES:
+            model = MODEL_ALIASES[model]
+
+        normalized = f"{state}/{mfr}/{model}/{year}/{serial}"
+        if suffix:
+            normalized += f"/{suffix}"
+
+        is_valid = (
+            state in VALID_STATES
+            and model in CATALOG_MODELS
+            and (2020 <= int(year) <= 2030)
+            and len(serial) == 5
+        )
+        return normalized, is_valid
+
+    # Check 2-part format if slash was replaced by 1 or missing
+    m2 = re.search(r"([A-Z]{2})142([A-Z0-9]{3,4})(202[0-9])([0-9]{5})", code)
+    if m2:
+        state, model, year, serial = m2.groups()
+        if model in MODEL_ALIASES:
+            model = MODEL_ALIASES[model]
+        normalized = f"{state}/142/{model}/{year}/{serial}"
+        is_valid = (state in VALID_STATES and model in CATALOG_MODELS)
+        return normalized, is_valid
+
+    return code, False
+
 
 class GeminiRoundRobinEngine:
     def __init__(self, api_keys: Optional[List[str]] = None, models: Optional[List[str]] = None):
@@ -67,6 +157,14 @@ class GeminiRoundRobinEngine:
         self.models = models or SUPPORTED_VISION_MODELS
         self._current_idx = 0
 
+        # Optional local high-speed engine if installed
+        self._local_engine = None
+        try:
+            from ocr_engine import StencilOCREngine
+            self._local_engine = StencilOCREngine()
+        except Exception:
+            self._local_engine = None
+
     def get_keys(self) -> List[str]:
         return self.api_keys
 
@@ -78,18 +176,88 @@ class GeminiRoundRobinEngine:
         self._current_idx = (self._current_idx + 1) % len(self.api_keys)
         return key, idx
 
-    def scan_part_number(self, img_input: Any, timeout: int = 15) -> Dict[str, Any]:
+    def _call_gemini_dual_view(self, img_bgr: np.ndarray, timeout: int = 12) -> Optional[str]:
         """
-        Fast execution path returning only the extracted PARTno and status.
+        Sends dual views (Original + Horizontally Flipped) to Gemini Vision.
+        Handles all orientations (0°, 90°, 180°, 270°) and mirrored cuts in 1 call.
         """
-        if not self.api_keys:
-            return {
-                "status": "FAILED",
-                "PARTno": None,
-                "error": "No Gemini API keys configured. Set GEMINI_API_KEYS in Render/Vercel Environment Variables."
-            }
+        h, w = img_bgr.shape[:2]
+        max_dim = 960
+        if max(h, w) > max_dim:
+            scale = max_dim / float(max(h, w))
+            resized = cv2.resize(img_bgr, (int(w * scale), int(h * scale)), interpolation=cv2.INTER_AREA)
+        else:
+            resized = img_bgr
 
-        # Normalize image input to numpy BGR
+        flipped = cv2.flip(resized, 1)
+
+        _, buf1 = cv2.imencode(".jpg", resized, [cv2.IMWRITE_JPEG_QUALITY, 80])
+        _, buf2 = cv2.imencode(".jpg", flipped, [cv2.IMWRITE_JPEG_QUALITY, 80])
+        b64_1 = base64.b64encode(buf1.tobytes()).decode("utf-8")
+        b64_2 = base64.b64encode(buf2.tobytes()).decode("utf-8")
+
+        payload = {
+            "contents": [{
+                "parts": [
+                    {"text": DUAL_VIEW_PROMPT},
+                    {"text": "View 1 (Original Photo):"},
+                    {"inline_data": {"mime_type": "image/jpeg", "data": b64_1}},
+                    {"text": "View 2 (Horizontally Flipped Photo):"},
+                    {"inline_data": {"mime_type": "image/jpeg", "data": b64_2}}
+                ]
+            }],
+            "generationConfig": {
+                "response_mime_type": "application/json",
+                "thinkingConfig": {"thinkingBudget": 0}
+            }
+        }
+        encoded_data = json.dumps(payload).encode("utf-8")
+
+        total_keys = len(self.api_keys)
+        for attempt in range(total_keys):
+            try:
+                key, key_idx = self._next_key_info()
+            except Exception:
+                break
+
+            for model_name in self.models:
+                url = f"https://generativelanguage.googleapis.com/v1beta/models/{model_name}:generateContent?key={key}"
+                req = urllib.request.Request(
+                    url,
+                    data=encoded_data,
+                    headers={"Content-Type": "application/json"},
+                    method="POST"
+                )
+
+                try:
+                    with urllib.request.urlopen(req, timeout=timeout) as resp:
+                        resp_json = json.loads(resp.read().decode("utf-8"))
+                        raw_text = resp_json["candidates"][0]["content"]["parts"][0]["text"]
+                        parsed_res = json.loads(raw_text)
+
+                        part_no = (
+                            parsed_res.get("PARTno")
+                            or parsed_res.get("part_no")
+                            or parsed_res.get("full_code")
+                            or ""
+                        ).strip()
+
+                        if part_no:
+                            return part_no
+
+                except Exception:
+                    continue
+
+        return None
+
+    def scan_part_number(self, img_input: Any, timeout: int = 12) -> Dict[str, Any]:
+        """
+        Scans and extracts the exact implement PARTno.
+        Response schema strictly matches:
+        {"status": "SUCCESS", "PARTno": "..."}
+        or {"status": "FAILED", "PARTno": null, "error": "..."}
+        """
+        # 1. Normalize image input to numpy BGR
         img_bgr = None
         if isinstance(img_input, str):
             img_bgr = cv2.imread(img_input)
@@ -116,94 +284,52 @@ class GeminiRoundRobinEngine:
                 "error": "Invalid or unreadable image input."
             }
 
-        # Resize to max 1024px for lightning-fast network upload & minimal latency
-        h, w = img_bgr.shape[:2]
-        max_dim = 1024
-        if max(h, w) > max_dim:
-            scale = max_dim / float(max(h, w))
-            resized = cv2.resize(img_bgr, (int(w * scale), int(h * scale)), interpolation=cv2.INTER_AREA)
-        else:
-            resized = img_bgr
-
-        _, buf = cv2.imencode(".jpg", resized, [cv2.IMWRITE_JPEG_QUALITY, 85])
-        img_b64 = base64.b64encode(buf.tobytes()).decode("utf-8")
-
-        payload = {
-            "contents": [{
-                "parts": [
-                    {"text": FAST_SYSTEM_PROMPT},
-                    {
-                        "inline_data": {
-                            "mime_type": "image/jpeg",
-                            "data": img_b64
-                        }
-                    }
-                ]
-            }],
-            "generationConfig": {
-                "response_mime_type": "application/json",
-                "thinkingConfig": {"thinkingBudget": 0}
-            }
-        }
-        encoded_data = json.dumps(payload).encode("utf-8")
-
-        total_keys = len(self.api_keys)
-        last_error = None
-
-        # Round-robin loop with multi-model fallback
-        for attempt in range(total_keys):
+        # 2. Fast Path: Local Stencil Engine (0.2s - if available and code is valid)
+        if self._local_engine is not None:
             try:
-                key, key_idx = self._next_key_info()
-            except Exception as e:
-                last_error = e
-                break
+                local_res = self._local_engine.process_image(img_bgr)
+                code = local_res.get("final_code") or ""
+                parsed_info = local_res.get("parsed_info") or {}
+                if code and parsed_info.get("is_valid"):
+                    norm_code, is_valid = normalize_stencil_code(code)
+                    if is_valid:
+                        return {
+                            "status": "SUCCESS",
+                            "PARTno": norm_code
+                        }
+            except Exception:
+                pass
 
-            for model_name in self.models:
-                url = f"https://generativelanguage.googleapis.com/v1beta/models/{model_name}:generateContent?key={key}"
-                req = urllib.request.Request(
-                    url,
-                    data=encoded_data,
-                    headers={"Content-Type": "application/json"},
-                    method="POST"
-                )
+        # 3. Vision Path: Gemini Vision Dual-View (All Angles + Mirrored Cut)
+        if self.api_keys:
+            raw_gemini_code = self._call_gemini_dual_view(img_bgr, timeout=timeout)
+            if raw_gemini_code:
+                norm_code, is_valid = normalize_stencil_code(raw_gemini_code)
+                return {
+                    "status": "SUCCESS",
+                    "PARTno": norm_code if norm_code else raw_gemini_code
+                }
 
-                try:
-                    with urllib.request.urlopen(req, timeout=timeout) as resp:
-                        resp_json = json.loads(resp.read().decode("utf-8"))
-                        raw_text = resp_json["candidates"][0]["content"]["parts"][0]["text"]
-                        parsed_res = json.loads(raw_text)
-
-                        part_no = (
-                            parsed_res.get("PARTno")
-                            or parsed_res.get("part_no")
-                            or parsed_res.get("full_code")
-                            or ""
-                        ).strip()
-
-                        if part_no:
-                            return {
-                                "status": "SUCCESS",
-                                "PARTno": part_no
-                            }
-
-                except Exception as e:
-                    last_error = e
-                    continue
+        # 4. Fallback check on local engine even if is_valid was False
+        if self._local_engine is not None:
+            try:
+                local_res = self._local_engine.process_image(img_bgr)
+                code = local_res.get("final_code") or ""
+                if code:
+                    norm_code, _ = normalize_stencil_code(code)
+                    return {
+                        "status": "SUCCESS",
+                        "PARTno": norm_code if norm_code else code
+                    }
+            except Exception:
+                pass
 
         return {
             "status": "FAILED",
             "PARTno": None,
-            "error": f"Scan failed across all keys: {str(last_error)}"
+            "error": "No stencil code could be recognized. Please ensure metal part is visible with clear lighting."
         }
 
     # Backward compatibility alias
-    def process_image(self, img_input: Any, timeout: int = 15) -> Dict[str, Any]:
-        res = self.scan_part_number(img_input, timeout=timeout)
-        part_no = res.get("PARTno") or ""
-        return {
-            "success": res.get("status") == "SUCCESS",
-            "status": res.get("status"),
-            "final_code": part_no,
-            "PARTno": part_no,
-            "error": res.get("error")
-        }
+    def process_image(self, img_input: Any, timeout: int = 12) -> Dict[str, Any]:
+        return self.scan_part_number(img_input, timeout=timeout)

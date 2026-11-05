@@ -40,9 +40,24 @@ def health():
         "active_keys": len(engine.get_keys())
     })
 
-@app.route('/ocr', methods=['POST'])
-@app.route('/api/ocr', methods=['POST'])
+@app.route('/ocr', methods=['GET', 'POST'])
+@app.route('/api/ocr', methods=['GET', 'POST'])
 def process_ocr():
+    if request.method == 'GET':
+        return jsonify({
+            "status": "ONLINE",
+            "service": "Metal Stencil Laser OCR API",
+            "method": "POST",
+            "supported_inputs": [
+                "multipart/form-data with key 'file' or 'image'",
+                "application/json with 'image' (base64 encoded string)"
+            ],
+            "sample_response": {
+                "status": "SUCCESS",
+                "PARTno": "GJ/142/446/2026/11881/UP"
+            }
+        }), 200
+
     img_bgr = None
 
     # 1. Multipart Form Upload ('file' or 'image')
