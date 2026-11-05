@@ -10,6 +10,7 @@ htmlcov/
 
 # Environments
 .env
+.env*
 .venv/
 env/
 venv/
@@ -18,13 +19,14 @@ ENV/
 # Streamlit
 .streamlit/secrets.toml
 
-# Vercel
-.vercel/
+# Vercel & uv
+.vercel
+_uv/
+api/.python-version
+api/pyproject.toml
+api/uv.lock
 
 # Operating System files
 .DS_Store
 Thumbs.db
 desktop.ini
-
-.vercel
-.env*

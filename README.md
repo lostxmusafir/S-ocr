@@ -19,6 +19,10 @@ An industrial vision OCR application and web service built for detecting, deskew
 
 ## Features
 
+- **Dual Intelligence OCR Engines**:
+  - 🌟 **Gemini Vision AI (4x Round-Robin Engine)**: Uses Google Gemini Vision models (`gemini-3.5-flash` / `gemini-3.8-flash`) across 4 free API keys in a continuous round-robin rotation with zero-downtime automatic failover. Outstanding accuracy on inverted, mirrored, blurry, bridge-slotted, and shadow-obscured metal stencils.
+  - ⚡ **Local RapidOCR (PaddleOCR ONNX)**: High-speed local offline engine with multi-angle deskewing, LAB-space CLAHE, bilateral filtering, and early-exit scheduling.
+  - 🔄 **Hybrid Auto-Fallback Mode**: Runs Gemini Vision AI first and automatically cascades to local RapidOCR if offline.
 - **Multi-Source Input**:
   - 📷 **Live Camera Scanner**: Scan directly via webcam or smartphone camera (supports mobile camera switching & automatic EXIF orientation normalization).
   - 📁 **File Upload**: Upload high-resolution images (PNG, JPG, JPEG, WEBP).

@@ -1,6 +1,6 @@
 """
 Laser Cut Metal Stencil OCR & Centralized Implement Code Scanner
-Built with Streamlit and RapidOCR (PaddleOCR ONNX).
+Powered by Google Gemini Vision AI (4x Round-Robin API Keys).
 Specialized for industrial sheet metal parts, beams, brackets, and tubes.
 """
 
@@ -14,11 +14,11 @@ import io
 import time
 from datetime import datetime
 
-from ocr_engine import StencilOCREngine, IMPLEMENT_CATALOG, STATE_CODES
+from gemini_scanner import GeminiRoundRobinEngine, IMPLEMENT_CATALOG, STATE_CODES
 
 # Page configuration
 st.set_page_config(
-    page_title="Metal Stencil OCR Scanner",
+    page_title="Metal Stencil OCR Scanner (Gemini Vision AI)",
     page_icon="🔍",
     layout="wide",
     initial_sidebar_state="expanded"
@@ -104,6 +104,18 @@ st.markdown("""
         font-weight: 700;
         letter-spacing: 1px;
     }
+
+    .status-badge-key {
+        display: inline-block;
+        background-color: #2e1065;
+        color: #c084fc;
+        border: 1px solid #7e22ce;
+        padding: 4px 14px;
+        border-radius: 9999px;
+        font-size: 13px;
+        font-weight: 700;
+        letter-spacing: 1px;
+    }
     
     .component-box {
         background-color: #161b22;
@@ -133,37 +145,36 @@ st.markdown("""
 # Initialize Session State
 if "scan_history" not in st.session_state:
     st.session_state.scan_history = []
-if "ocr_engine" not in st.session_state:
-    with st.spinner("Initializing Laser Stencil OCR Engine..."):
-        st.session_state.ocr_engine = StencilOCREngine()
+if "gemini_engine" not in st.session_state:
+    st.session_state.gemini_engine = GeminiRoundRobinEngine()
 
-engine = st.session_state.ocr_engine
+engine = st.session_state.gemini_engine
 
 # Header
 st.title("⚡ Laser Cut Metal Stencil OCR Scanner")
-st.caption("Industrial vision scanner for agricultural implement laser-cut stencil codes (1-line, 2-line, vertical, and rotated).")
+st.caption("Industrial vision scanner powered by Google Gemini Vision AI with 4x Round-Robin API Keys.")
 
 # Sidebar
 with st.sidebar:
-    st.header("⚙️ Scanner Input & Settings")
-    
+    st.header("⚙️ Scanner Settings")
+
+    st.markdown("### 🧠 AI Engine: **Gemini Vision AI**")
+    st.caption("Active vision model with multi-key round-robin rotation and automatic failover.")
+
+    with st.expander("🔑 4x Gemini API Keys Status", expanded=True):
+        keys = engine.get_keys()
+        stats = engine.stats
+        for i, k in enumerate(keys):
+            masked = f"...{k[-6:]}"
+            usage = stats["key_usage"][i] if i < len(stats["key_usage"]) else 0
+            st.markdown(f"**Slot #{i+1}**: 🟢 `Active` | `{masked}` | Served: **{usage}**")
+        st.caption("Rotation: Automatic Round-Robin across all 4 keys.")
+
+    st.markdown("---")
     input_mode = st.radio(
         "Choose Image Source:",
         ["📁 Upload Image File", "📷 Live Camera Scan", "🖼️ Sample Images Gallery"],
         index=0
-    )
-    
-    st.markdown("---")
-    st.subheader("🛠️ Detection Controls")
-    auto_rotate = st.checkbox(
-        "Auto-detect Rotation (0°, 90°, 180°, 270°)",
-        value=True,
-        help="Automatically checks 4 orientations to detect upside-down or vertical codes."
-    )
-    invert_preview = st.checkbox(
-        "Invert Binary Cutout (Black on White)",
-        value=False,
-        help="Invert the thresholded cutout display polarity."
     )
     
     st.markdown("---")
@@ -230,15 +241,15 @@ if image_bytes is not None:
 
     col_run, col_time = st.columns([2, 4])
     with col_run:
-        scan_button = st.button("🚀 Analyze & Extract Number", type="primary", use_container_width=True)
+        scan_button = st.button("🚀 Analyze & Extract Stencil Number", type="primary", use_container_width=True)
 
-    scan_id = f"{image_name}_{auto_rotate}"
+    scan_id = f"{image_name}"
     needs_processing = scan_button or (st.session_state.get("last_scan_id") != scan_id)
 
     if needs_processing:
         start_t = time.time()
-        with st.spinner("Processing image, deskewing, and recognizing stencil text..."):
-            result = engine.process_image(orig_bgr, auto_rotate=auto_rotate)
+        with st.spinner("Analyzing metal stencil with Gemini Vision AI (Round-Robin)..."):
+            result = engine.process_image(orig_bgr)
         elapsed_ms = round((time.time() - start_t) * 1000, 1)
         result["elapsed_ms"] = elapsed_ms
         st.session_state.current_result = result
@@ -282,10 +293,18 @@ if image_bytes is not None:
             badges.append('<span class="status-badge-pending">ℹ RAW / UNSTRUCTURED TEXT</span>')
             card_title = "IDENTIFIED TEXT"
 
+        if result.get("key_used_slot"):
+            badges.append(f'<span class="status-badge-key">🔑 GEMINI KEY #{result["key_used_slot"]} ({result.get("key_masked", "")})</span>')
+
+        if result.get("model_used"):
+            badges.append(f'<span class="status-badge-doc">🤖 {result["model_used"]}</span>')
+
         if result.get("is_mirrored"):
-            badges.append('<span class="status-badge-pending" style="margin-left: 8px;">🪞 BACK-SIDE MIRRORED SCAN</span>')
-        if result.get("best_angle", 0) != 0:
-            badges.append(f'<span class="status-badge-doc" style="margin-left: 8px;">🔄 ROTATED {result["best_angle"]}°</span>')
+            badges.append('<span class="status-badge-pending">🪞 BACK-SIDE MIRRORED SCAN</span>')
+
+        b_angle = result.get("best_angle", "0deg")
+        if b_angle and b_angle != "0deg" and b_angle != 0:
+            badges.append(f'<span class="status-badge-doc">🔄 {b_angle}</span>')
 
         status_html = " ".join(badges)
 
@@ -308,6 +327,10 @@ if image_bytes is not None:
         if len(all_codes) > 1:
             st.info(f"**Multi-Part Stacked Implement Alert:** Found {len(all_codes)} distinct implement codes in this frame: " + " | ".join([f"`{c}`" for c in all_codes]))
 
+        # Notes
+        if parsed.get("notes"):
+            st.caption(f"💡 **AI Vision Observations:** {parsed['notes']}")
+
         # ---------------------------------------------------------------------
         # 2. HIGH-CONTRAST DIGITAL STENCIL BADGE & CUTOUT (WHITE ON BLACK)
         # ---------------------------------------------------------------------
@@ -319,9 +342,8 @@ if image_bytes is not None:
         with c_bin1:
             cropped_bin = result.get("cropped_binary")
             if cropped_bin is not None:
-                disp_bin = cv2.bitwise_not(cropped_bin) if invert_preview else cropped_bin
                 st.image(
-                    disp_bin,
+                    cropped_bin,
                     caption="Extracted Stencil Patch (White Characters on Pure Black)",
                     use_container_width=True,
                     clamp=True
@@ -336,13 +358,6 @@ if image_bytes is not None:
                 st.image(
                     stamp_rgb,
                     caption="Generated High-Contrast Digital Label Badge (White on Black)",
-                    use_container_width=True
-                )
-            elif result.get("cropped_color") is not None:
-                cropped_rgb = cv2.cvtColor(result["cropped_color"], cv2.COLOR_BGR2RGB)
-                st.image(
-                    cropped_rgb,
-                    caption="Deskewed Metal Surface Crop",
                     use_container_width=True
                 )
 
@@ -398,130 +413,55 @@ if image_bytes is not None:
                     <div style="font-size: 10px; color: #888;">{parsed.get('model_info', {}).get('series', '') if parsed.get('model_info') else ''}</div>
                 </div>
                 """, unsafe_allow_html=True)
-
+                
             with c4:
                 st.markdown(f"""
                 <div class="component-box">
-                    <div class="component-label">Year</div>
+                    <div class="component-label">Mfg Year</div>
                     <div class="component-value">{parsed.get('year', '-') or '-'}</div>
-                    <div style="font-size: 10px; color: #888;">Mfg Year</div>
+                    <div style="font-size: 10px; color: #888;">Production Year</div>
                 </div>
                 """, unsafe_allow_html=True)
-
+                
             with c5:
                 st.markdown(f"""
                 <div class="component-box">
-                    <div class="component-label">Serial / Unit</div>
+                    <div class="component-label">Serial No</div>
                     <div class="component-value">{parsed.get('serial_no', '-') or '-'}</div>
-                    <div style="font-size: 10px; color: #888;">Batch Unit #</div>
+                    <div style="font-size: 10px; color: #888;">5-Digit Serial</div>
                 </div>
                 """, unsafe_allow_html=True)
-
+                
             with c6:
                 st.markdown(f"""
                 <div class="component-box">
-                    <div class="component-label">Suffix / Mark</div>
+                    <div class="component-label">Suffix / Pos</div>
                     <div class="component-value">{parsed.get('suffix', '-') or '-'}</div>
-                    <div style="font-size: 10px; color: #888;">Orientation/Mark</div>
+                    <div style="font-size: 10px; color: #888;">Assembly Suffix</div>
                 </div>
                 """, unsafe_allow_html=True)
 
-            # Matched Model Information from Catalog
-            if parsed.get("model_info"):
-                m_info = parsed["model_info"]
-                st.success(f"**Catalog Match:** Model `{parsed.get('model_code')}` is identified as **{m_info['name']}** ({m_info['series']}). Typical sizes: {', '.join(m_info['sizes'])}.")
-
         # ---------------------------------------------------------------------
-        # 4. FULL IMAGE DETECTION BOUNDING BOXES & RAW TOKENS
+        # 4. RAW DETECTIONS & EXPORT
         # ---------------------------------------------------------------------
         st.markdown("---")
-        st.subheader("🖼️ Full Image & Detected Bounding Boxes")
-        
-        annotated = result.get("annotated_image")
-        if annotated is not None:
-            ann_rgb = cv2.cvtColor(annotated, cv2.COLOR_BGR2RGB)
-            st.image(ann_rgb, caption=f"Analyzed Image (Auto-Rotated {result.get('best_angle', 0)}° | {elapsed_ms} ms)", use_container_width=True)
+        exp_col1, exp_col2 = st.columns([3, 1])
+        with exp_col1:
+            st.subheader("📊 Scan History & Audit Log")
+        with exp_col2:
+            if st.session_state.scan_history:
+                csv_data = "Timestamp,File,Code,Valid,Elapsed_ms\n"
+                for h in st.session_state.scan_history:
+                    csv_data += f'"{h["timestamp"]}","{h["file"]}","{h["code"]}",{h["is_valid"]},{h["elapsed_ms"]}\n'
+                st.download_button(
+                    "📥 Export History (CSV)",
+                    data=csv_data,
+                    file_name=f"stencil_scans_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
+                    mime="text/csv",
+                    use_container_width=True
+                )
 
-        with st.expander("🔍 View Raw OCR Line Detections & Confidence Scores"):
-            raw_dets = result.get("raw_detections", [])
-            if raw_dets:
-                for idx, det in enumerate(raw_dets, 1):
-                    st.write(f"**Line {idx}:** `{det['text']}` | Confidence: `{det['score']}`")
-            else:
-                st.write("No raw detections.")
-
-        # ---------------------------------------------------------------------
-        # 5. EXPORT & DOWNLOAD SECTION
-        # ---------------------------------------------------------------------
-        st.markdown("---")
-        st.subheader("💾 Export & Data Logging")
-        
-        export_payload = {
-            "timestamp": datetime.now().isoformat(),
-            "image_name": image_name,
-            "final_code": final_code,
-            "is_valid": is_valid,
-            "parsed_components": parsed,
-            "raw_detections": result.get("raw_detections", []),
-            "elapsed_ms": elapsed_ms
-        }
-        
-        c_exp1, c_exp2, c_exp3, c_exp4 = st.columns(4)
-        with c_exp1:
-            st.download_button(
-                "📥 Download Result (JSON)",
-                data=json.dumps(export_payload, indent=2),
-                file_name=f"ocr_result_{image_name}.json",
-                mime="application/json",
-                use_container_width=True
-            )
-        with c_exp2:
-            st.download_button(
-                "📄 Download Code (TXT)",
-                data=final_code,
-                file_name=f"code_{image_name}.txt",
-                mime="text/plain",
-                use_container_width=True
-            )
-        with c_exp3:
-            if cropped_bin is not None:
-                is_success, buffer = cv2.imencode(".png", cropped_bin)
-                if is_success:
-                    st.download_button(
-                        "🖼️ Download Stencil Mask (PNG)",
-                        data=buffer.tobytes(),
-                        file_name=f"stencil_mask_{image_name}.png",
-                        mime="image/png",
-                        use_container_width=True
-                    )
-        with c_exp4:
-            digital_stamp = result.get("digital_stamp")
-            if digital_stamp is not None:
-                is_success, stamp_buf = cv2.imencode(".png", digital_stamp)
-                if is_success:
-                    st.download_button(
-                        "🏷️ Download Digital Badge (PNG)",
-                        data=stamp_buf.tobytes(),
-                        file_name=f"digital_badge_{image_name}.png",
-                        mime="image/png",
-                        use_container_width=True
-                    )
-
-# History Section
-if st.session_state.scan_history:
-    st.markdown("---")
-    st.subheader("📜 Recent Scan History")
-    st.dataframe(
-        st.session_state.scan_history,
-        use_container_width=True,
-        column_config={
-            "timestamp": "Timestamp",
-            "file": "Source Image",
-            "code": "Identified Code",
-            "is_valid": "Valid Implement Code",
-            "elapsed_ms": "Scan Time (ms)"
-        }
-    )
-else:
-    if image_bytes is None:
-        st.info("👈 Select an image source from the sidebar (Camera, File Upload, or Sample Gallery) to begin scanning.")
+        if st.session_state.scan_history:
+            st.dataframe(st.session_state.scan_history, use_container_width=True)
+        else:
+            st.info("No scans recorded yet. Upload an image or select a sample to begin.")
