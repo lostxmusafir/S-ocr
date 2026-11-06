@@ -259,6 +259,10 @@ class GeminiRoundRobinEngine:
                             return part_no
 
                 except urllib.error.HTTPError as e:
+                    if e.code == 401:
+                        # Unauthorized/Invalid key: put in 1-hour cooldown & immediately switch to next key
+                        self._key_cooldowns[key] = time.time() + 3600
+                        break
                     # Model specific 404, 429, or 503: try next model on this key
                     continue
                 except Exception:
