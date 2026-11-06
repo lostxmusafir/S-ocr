@@ -16,9 +16,9 @@ import cv2
 from typing import Dict, Any, Tuple, Optional, List
 
 SUPPORTED_VISION_MODELS = [
-    "gemini-3-flash-preview",
     "gemini-2.5-flash",
-    "gemini-3.5-flash-lite",
+    "gemini-flash-latest",
+    "gemini-3-flash-preview",
     "gemini-3.8-flash",
 ]
 
@@ -218,8 +218,7 @@ class GeminiRoundRobinEngine:
                 ]
             }],
             "generationConfig": {
-                "response_mime_type": "application/json",
-                "thinkingConfig": {"thinkingBudget": 0}
+                "response_mime_type": "application/json"
             }
         }
         encoded_data = json.dumps(payload).encode("utf-8")
@@ -243,7 +242,10 @@ class GeminiRoundRobinEngine:
                 try:
                     with urllib.request.urlopen(req, timeout=timeout) as resp:
                         resp_json = json.loads(resp.read().decode("utf-8"))
-                        raw_text = resp_json["candidates"][0]["content"]["parts"][0]["text"]
+                        raw_text = resp_json["candidates"][0]["content"]["parts"][0]["text"].strip()
+                        if raw_text.startswith("```"):
+                            raw_text = re.sub(r"^```(?:json)?\s*", "", raw_text)
+                            raw_text = re.sub(r"\s*```$", "", raw_text).strip()
                         parsed_res = json.loads(raw_text)
 
                         part_no = (
@@ -257,14 +259,13 @@ class GeminiRoundRobinEngine:
                             return part_no
 
                 except urllib.error.HTTPError as e:
-                    if e.code == 429:
-                        # Rate limit hit: put key in 60s cooldown & immediately switch to NEXT key!
-                        self._key_cooldowns[key] = time.time() + 60
-                        break
-                    # If 404/503 on this specific model, try next model on this key
+                    # Model specific 404, 429, or 503: try next model on this key
                     continue
                 except Exception:
                     continue
+
+            # If all models failed on this key, put key in cooldown
+            self._key_cooldowns[key] = time.time() + 60
 
         return None
 
