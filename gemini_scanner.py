@@ -48,20 +48,21 @@ MODEL_ALIASES = {
 }
 
 def load_dotenv_if_exists():
-    for env_path in [".env", os.path.join(os.path.dirname(os.path.abspath(__file__)), ".env")]:
-        if os.path.exists(env_path):
-            try:
-                with open(env_path, "r", encoding="utf-8") as f:
-                    for line in f:
-                        line = line.strip()
-                        if line and not line.startswith("#") and "=" in line:
-                            k, v = line.split("=", 1)
-                            k = k.strip()
-                            v = v.strip().strip('"').strip("'")
-                            if k and not os.environ.get(k):
-                                os.environ[k] = v
-            except Exception:
-                pass
+    for env_name in [".env", ".env.local"]:
+        for env_path in [env_name, os.path.join(os.path.dirname(os.path.abspath(__file__)), env_name)]:
+            if os.path.exists(env_path):
+                try:
+                    with open(env_path, "r", encoding="utf-8") as f:
+                        for line in f:
+                            line = line.strip()
+                            if line and not line.startswith("#") and "=" in line:
+                                k, v = line.split("=", 1)
+                                k = k.strip()
+                                v = v.strip().strip('"').strip("'")
+                                if k and not os.environ.get(k):
+                                    os.environ[k] = v
+                except Exception:
+                    pass
 
 load_dotenv_if_exists()
 
@@ -287,13 +288,24 @@ class GeminiRoundRobinEngine:
         }
         encoded_data = json.dumps(payload).encode("utf-8")
 
-        # Determine key pool to use
+        # Determine key pool to use with true round-robin rotation
         if api_key:
             keys_to_try = [api_key]
         else:
-            keys_to_try = self.api_keys
+            n = len(self.api_keys)
+            if n > 0:
+                start = self._current_idx % n
+                self._current_idx = (self._current_idx + 1) % n
+                keys_to_try = self.api_keys[start:] + self.api_keys[:start]
+            else:
+                keys_to_try = []
 
+        now = time.time()
         for key in keys_to_try:
+            # Skip keys in cooldown if we have other options
+            if self._key_cooldowns.get(key, 0) > now and len(keys_to_try) > 1:
+                continue
+
             for model_name in self.models:
                 url = f"https://generativelanguage.googleapis.com/v1beta/models/{model_name}:generateContent?key={key}"
                 req = urllib.request.Request(
@@ -323,11 +335,14 @@ class GeminiRoundRobinEngine:
                             return part_no
 
                 except urllib.error.HTTPError as e:
-                    if e.code == 401:
-                        # Unauthorized/Invalid key: put in 1-hour cooldown & immediately switch to next key
+                    if e.code in (401, 403, 404):
+                        # Invalid/Unauthorized/Model not found: mark this key as dead & immediately transfer to next key
                         self._key_cooldowns[key] = time.time() + 3600
                         break
-                    # Model specific 404, 429, or 503: try next model on this key
+                    elif e.code == 429:
+                        # Rate limit hit: put in 60s cooldown & immediately transfer to next key
+                        self._key_cooldowns[key] = time.time() + 60
+                        break
                     continue
                 except Exception:
                     continue
