@@ -249,7 +249,7 @@ class GeminiRoundRobinEngine:
         self._current_idx = (self._current_idx + 1) % n
         return key, idx
 
-    def _call_gemini_dual_view(self, img_bgr: np.ndarray, timeout: int = 12) -> Optional[str]:
+    def _call_gemini_dual_view(self, img_bgr: np.ndarray, api_key: Optional[str] = None, timeout: int = 12) -> Optional[str]:
         """
         Sends dual views (Original + Horizontally Flipped) to Gemini Vision.
         Handles all orientations (0°, 90°, 180°, 270°) and mirrored cuts in 1 call.
@@ -287,13 +287,13 @@ class GeminiRoundRobinEngine:
         }
         encoded_data = json.dumps(payload).encode("utf-8")
 
-        total_keys = len(self.api_keys)
-        for attempt in range(total_keys):
-            try:
-                key, key_idx = self._next_key_info()
-            except Exception:
-                break
+        # Determine key pool to use
+        if api_key:
+            keys_to_try = [api_key]
+        else:
+            keys_to_try = self.api_keys
 
+        for key in keys_to_try:
             for model_name in self.models:
                 url = f"https://generativelanguage.googleapis.com/v1beta/models/{model_name}:generateContent?key={key}"
                 req = urllib.request.Request(
@@ -337,9 +337,9 @@ class GeminiRoundRobinEngine:
 
         return None
 
-    def scan_part_number(self, img_input: Any, timeout: int = 12) -> Dict[str, Any]:
+    def scan_part_number(self, img_input: Any, api_key: Optional[str] = None, timeout: int = 12) -> Dict[str, Any]:
         """
-        Scans and extracts the exact implement PARTno.
+        Scans and extracts the exact implement PARTno purely via Gemini 2.5 Flash Cloud Vision.
         Response schema strictly matches:
         {"status": "SUCCESS", "PARTno": "..."}
         or {"status": "FAILED", "PARTno": null, "error": "..."}
@@ -371,52 +371,30 @@ class GeminiRoundRobinEngine:
                 "error": "Invalid or unreadable image input."
             }
 
-        # 2. Fast Path: Local Stencil Engine (0.2s - if available and code is valid)
-        if self._local_engine is not None:
-            try:
-                local_res = self._local_engine.process_image(img_bgr)
-                code = local_res.get("final_code") or ""
-                parsed_info = local_res.get("parsed_info") or {}
-                if code and parsed_info.get("is_valid"):
-                    norm_code, is_valid = normalize_stencil_code(code)
-                    if is_valid:
-                        return {
-                            "status": "SUCCESS",
-                            "PARTno": norm_code
-                        }
-            except Exception:
-                pass
+        # 2. Check for configured API keys
+        has_key = bool(api_key or self.api_keys)
+        if not has_key:
+            return {
+                "status": "FAILED",
+                "PARTno": None,
+                "error": "No Gemini API Key configured. Please set GEMINI_API_KEYS environment variable or pass x-api-key header."
+            }
 
-        # 3. Vision Path: Gemini Vision Dual-View (All Angles + Mirrored Cut)
-        if self.api_keys:
-            raw_gemini_code = self._call_gemini_dual_view(img_bgr, timeout=timeout)
-            if raw_gemini_code:
-                norm_code, is_valid = normalize_stencil_code(raw_gemini_code)
-                return {
-                    "status": "SUCCESS",
-                    "PARTno": norm_code if norm_code else raw_gemini_code
-                }
-
-        # 4. Fallback check on local engine even if is_valid was False
-        if self._local_engine is not None:
-            try:
-                local_res = self._local_engine.process_image(img_bgr)
-                code = local_res.get("final_code") or ""
-                if code:
-                    norm_code, _ = normalize_stencil_code(code)
-                    return {
-                        "status": "SUCCESS",
-                        "PARTno": norm_code if norm_code else code
-                    }
-            except Exception:
-                pass
+        # 3. Vision Path: Pure Gemini 2.5 Flash Cloud Vision (Dual-View + CLAHE)
+        raw_gemini_code = self._call_gemini_dual_view(img_bgr, api_key=api_key, timeout=timeout)
+        if raw_gemini_code:
+            norm_code, is_valid = normalize_stencil_code(raw_gemini_code)
+            return {
+                "status": "SUCCESS",
+                "PARTno": norm_code if norm_code else raw_gemini_code
+            }
 
         return {
             "status": "FAILED",
             "PARTno": None,
-            "error": "No stencil code could be recognized. Please ensure metal part is visible with clear lighting."
+            "error": "Gemini 2.5 Flash Cloud Vision could not detect a valid implement code in the image. Please ensure the stamped metal beam is visible."
         }
 
     # Backward compatibility alias
-    def process_image(self, img_input: Any, timeout: int = 12) -> Dict[str, Any]:
-        return self.scan_part_number(img_input, timeout=timeout)
+    def process_image(self, img_input: Any, api_key: Optional[str] = None, timeout: int = 12) -> Dict[str, Any]:
+        return self.scan_part_number(img_input, api_key=api_key, timeout=timeout)

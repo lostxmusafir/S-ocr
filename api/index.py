@@ -59,6 +59,7 @@ def process_ocr():
         }), 200
 
     img_bgr = None
+    req_api_key = request.headers.get('x-api-key') or request.args.get('api_key')
 
     # 1. Multipart Form Upload ('file' or 'image')
     file = request.files.get('file') or request.files.get('image')
@@ -70,6 +71,8 @@ def process_ocr():
     # 2. JSON Base64 Payload
     elif request.is_json:
         data = request.get_json() or {}
+        if not req_api_key:
+            req_api_key = data.get('api_key')
         img_data = data.get('image', '') or data.get('file', '')
         if img_data:
             if ',' in img_data:
@@ -94,7 +97,24 @@ def process_ocr():
 
     try:
         engine = get_gemini_engine()
-        result = engine.scan_part_number(img_bgr)
+        result = engine.scan_part_number(img_bgr, api_key=req_api_key)
+        
+        # Ensure backward compatibility for web UI & legacy callers
+        part_no = result.get("PARTno")
+        if part_no:
+            result["final_code"] = part_no
+            parts = part_no.split('/')
+            result["parsed_info"] = {
+                "full_code": part_no,
+                "state_code": parts[0] if len(parts) > 0 else "GJ",
+                "mfr_code": parts[1] if len(parts) > 1 else "142",
+                "model_code": parts[2] if len(parts) > 2 else "",
+                "year": parts[3] if len(parts) > 3 else "",
+                "serial_no": parts[4] if len(parts) > 4 else "",
+                "suffix": parts[5] if len(parts) > 5 else "",
+                "is_valid": True
+            }
+
         status_code = 200 if result.get("status") == "SUCCESS" else 502
         return jsonify(result), status_code
 
