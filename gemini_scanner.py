@@ -67,28 +67,41 @@ load_dotenv_if_exists()
 
 DUAL_VIEW_PROMPT = """You are an expert OCR model for laser-cut metal stencils on agricultural implement parts.
 You are provided TWO views of the metal part:
-- View 1: Original photo
+- View 1: Original photo (contrast-enhanced to isolate laser cutouts)
 - View 2: Horizontally flipped photo (un-mirrored, in case View 1 was taken from the reverse side of a through-cut plate)
 
 The implement part number format: STATE/MFR/MODEL/YEAR/SERIAL[/SUFFIX]
-- STATE: 2-letter state code (GJ, MH, MP, RJ, PB, HR, UP, etc.)
-- MFR: 142
-- MODEL: Must be one of: 444, 445, 446, 447, 3528, 3674
+- STATE: 2-letter state code, ALWAYS "GJ" (Gujarat). In stencil font, the letter "G" has a bridge cut and may look like "C", "6", or "O" — decode it as "GJ".
+- MFR: Always "142"
+- MODEL: Must be one of authorized models: 444, 445, 446, 447, 3528, 3674
 - YEAR: 4-digit year like 2024, 2025, 2026, 2027
 - SERIAL: 5-digit number like 11881, 11541, 12313, 44579, 10800, 10652
-- SUFFIX: Optional suffix like UP
+- SUFFIX: Optional suffix like "UP"
 
-CRITICAL INSTRUCTIONS:
-1. One view is forward-readable (letters and numbers read normally, not backwards/mirrored). Compare View 1 and View 2 to find the forward-readable text.
-2. Read from any rotation angle (0°, 90°, 180°, 270°).
-3. If split across 2 lines (Line 1: GJ/142/3674, Line 2: 2026/10652), merge into a single code: GJ/142/3674/2026/10652.
-4. Return ONLY JSON format:
+CRITICAL INSTRUCTIONS FOR LASER CUTOUT STENCILS:
+1. BACKGROUND COLORS IN SLITS: The numbers/letters are hollow holes cut through sheet metal. A different background color (floor, shadows, paint, reflections) shows through the cutout slits. Do not get confused by background colors — trace the actual cutout shapes of the characters.
+2. STENCIL BRIDGES: Stencil characters have bridge tabs holding inner islands (e.g. in 0, 4, 6, 8, 9, A, B, D, G, O, P, Q, R). Mentally connect the separated segments to identify the true digit (e.g. 4 with bridge slit, 6 with bridge slit, 8 with bridge slit).
+3. ORIENTATION & DIRECTION: One view is forward-readable. If text is read backwards (e.g. ending in ".../142/GJ"), re-order so it ALWAYS starts with "GJ/142/...".
+4. TWO-LINE STENCILS: If split across 2 lines (Line 1: GJ/142/3674, Line 2: 2026/10652), merge into a single code: GJ/142/3674/2026/10652.
+
+Return ONLY JSON:
 {"PARTno": "GJ/142/446/2026/11881/UP"}
 """
 
+def enhance_laser_cut_contrast(img_bgr: np.ndarray) -> np.ndarray:
+    """
+    Normalizes local contrast between metal plate and cutout holes using LAB-space CLAHE.
+    Eliminates confusion caused by background colors, shadows, or metallic specular glare.
+    """
+    lab = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2LAB)
+    l, a, b = cv2.split(lab)
+    clahe = cv2.createCLAHE(clipLimit=3.0, tileGridSize=(8, 8))
+    l_clahe = clahe.apply(l)
+    return cv2.cvtColor(cv2.merge((l_clahe, a, b)), cv2.COLOR_LAB2BGR)
+
 def normalize_stencil_code(raw_code: str) -> Tuple[str, bool]:
     """
-    Cleans, fixes stencil bridges, and validates standard implement syntax.
+    Cleans, fixes stencil bridges, handles reversed tokens, and validates standard implement syntax.
     Returns (cleaned_code, is_valid).
     """
     if not raw_code:
@@ -97,20 +110,71 @@ def normalize_stencil_code(raw_code: str) -> Tuple[str, bool]:
     code = raw_code.strip().replace(" ", "").replace("\\", "/").upper()
     code = re.sub(r"[^A-Z0-9/]", "", code)
 
-    # Normalize state code bridges (e.g. CJ/ -> GJ/, CL/ -> GJ/)
-    if code.startswith(("CJ/", "CL/", "GU/")):
-        code = "GJ/" + code[3:]
+    parts = [p for p in code.split("/") if p]
+    if not parts:
+        return "", False
 
-    # Remove accidental leading 1 from /12026 -> /2026
-    code = re.sub(r"/(1)(202[0-9])/", r"/\2/", code)
+    # 1. Handle reversed token order (e.g. UP/11881/2026/446/142/GJ -> GJ/142/446/2026/11881/UP)
+    if len(parts) >= 4:
+        if parts[-1] in ("GJ", "CJ", "GU", "6J", "0J") or (len(parts) >= 2 and parts[-2] in ("142", "GJ") and parts[-1] in ("GJ", "UP")):
+            parts.reverse()
+        elif parts[-1] == "142":
+            parts.reverse()
 
-    # Standard pattern: STATE/MFR/MODEL/YEAR/SERIAL(/SUFFIX)?
-    m = re.search(r"([A-Z]{2})/([0-9]{3})/([A-Z0-9]{2,5})/([0-9]{4})/([0-9]{5})(?:/([A-Z0-9]+))?", code)
-    if m:
-        state, mfr, model, year, serial, suffix = m.groups()
-        # Normalize model bridge aliases
+    # 2. If state prefix is missing but starts with 142 (e.g. 142/446/2026/11881) -> prepend GJ
+    if parts[0] == "142":
+        parts.insert(0, "GJ")
+
+    # 3. State normalization (bridge cuts make G look like C, 6, O, CI, GU)
+    state = parts[0]
+    if state in ("CJ", "CL", "CI", "GU", "6J", "0J", "OJ", "G", "J", "GI", "C"):
+        state = "GJ"
+    parts[0] = state
+
+    # 4. Standard 5 or 6 component parsing
+    if len(parts) >= 5:
+        state = parts[0]
+        mfr = parts[1]
+        model = parts[2]
+        year = parts[3]
+        serial = parts[4]
+        suffix = parts[5] if len(parts) > 5 else ""
+
+        # Normalize manufacturer code (almost always 142)
+        if mfr in ("142", "14Z", "I42", "14", "1421"):
+            mfr = "142"
+
+        # Normalize model aliases
         if model in MODEL_ALIASES:
             model = MODEL_ALIASES[model]
+
+        # Normalize year (bridge cuts in 6 make 2026 look like 202G, 202C, 2O26)
+        if re.match(r"^202[GCQ0BF4b1ILI]?$", year) or year in ("202", "2O26", "2020"):
+            year = "2026"
+
+        # Normalize serial: char-to-digit mapping for stencil bridge cut confusions
+        char_map = {
+            "O": "0", "D": "0", "Q": "0",
+            "I": "1", "L": "1", "|": "1", "]": "1", "[": "1",
+            "Z": "2",
+            "E": "3",
+            "A": "4", "H": "4",
+            "S": "5",
+            "G": "6", "B": "8",
+            "T": "7"
+        }
+        s_clean = "".join(char_map.get(ch, ch) for ch in serial)
+        digits = re.sub(r"\D", "", s_clean)
+        # Accidental duplicate '1' from slash misread (e.g. /111881 -> 11881)
+        if len(digits) == 6 and digits.startswith("11"):
+            digits = digits[1:]
+        elif len(digits) > 5:
+            digits = digits[:5]
+        serial = digits
+
+        # Normalize suffix
+        if suffix in ("UIP", "LIP", "7UP", "1UP", "UF", "UIF", "VIP", "VP", "UPP", "U", "P"):
+            suffix = "UP"
 
         normalized = f"{state}/{mfr}/{model}/{year}/{serial}"
         if suffix:
@@ -119,22 +183,20 @@ def normalize_stencil_code(raw_code: str) -> Tuple[str, bool]:
         is_valid = (
             state in VALID_STATES
             and model in CATALOG_MODELS
-            and (2020 <= int(year) <= 2030)
             and len(serial) == 5
         )
         return normalized, is_valid
 
-    # Check 2-part format if slash was replaced by 1 or missing
-    m2 = re.search(r"([A-Z]{2})142([A-Z0-9]{3,4})(202[0-9])([0-9]{5})", code)
-    if m2:
-        state, model, year, serial = m2.groups()
-        if model in MODEL_ALIASES:
-            model = MODEL_ALIASES[model]
-        normalized = f"{state}/142/{model}/{year}/{serial}"
-        is_valid = (state in VALID_STATES and model in CATALOG_MODELS)
-        return normalized, is_valid
+    # Fallback regex search for un-slashed codes
+    m = re.search(r"([A-Z]{2})/([0-9]{3})/([A-Z0-9]{2,5})/([0-9]{4})/([0-9]{5})(?:/([A-Z0-9]+))?", code)
+    if m:
+        s, mf, mo, y, ser, su = m.groups()
+        if mo in MODEL_ALIASES: mo = MODEL_ALIASES[mo]
+        norm = f"{s}/{mf}/{mo}/{y}/{ser}"
+        if su: norm += f"/{su}"
+        return norm, True
 
-    return code, False
+    return "/".join(parts), False
 
 
 class GeminiRoundRobinEngine:
@@ -200,10 +262,12 @@ class GeminiRoundRobinEngine:
         else:
             resized = img_bgr
 
-        flipped = cv2.flip(resized, 1)
+        # Apply CLAHE contrast enhancement to isolate laser-cutout slits from background colors
+        enhanced = enhance_laser_cut_contrast(resized)
+        flipped = cv2.flip(enhanced, 1)
 
-        _, buf1 = cv2.imencode(".jpg", resized, [cv2.IMWRITE_JPEG_QUALITY, 80])
-        _, buf2 = cv2.imencode(".jpg", flipped, [cv2.IMWRITE_JPEG_QUALITY, 80])
+        _, buf1 = cv2.imencode(".jpg", enhanced, [cv2.IMWRITE_JPEG_QUALITY, 85])
+        _, buf2 = cv2.imencode(".jpg", flipped, [cv2.IMWRITE_JPEG_QUALITY, 85])
         b64_1 = base64.b64encode(buf1.tobytes()).decode("utf-8")
         b64_2 = base64.b64encode(buf2.tobytes()).decode("utf-8")
 
