@@ -17,9 +17,6 @@ from typing import Dict, Any, Tuple, Optional, List
 
 SUPPORTED_VISION_MODELS = [
     "gemini-2.5-flash",
-    "gemini-flash-latest",
-    "gemini-3-flash-preview",
-    "gemini-3.8-flash",
 ]
 
 # Canonical catalog of authorized models and states
