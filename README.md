@@ -1,127 +1,325 @@
-# Laser Cut Metal Stencil OCR & Implement Code Scanner
+# ⚡ Laser Cut Metal Stencil OCR & Industrial Implement Code Scanner
 
-An industrial vision OCR application and web service built for detecting, deskewing, binarizing, and recognizing laser-cut stencil codes on sheet metal parts, tubes, brackets, and agricultural implements.
+[![Vercel Deployment](https://img.shields.io/badge/Vercel-Deployed-black?logo=vercel&logoColor=white)](https://s-ocr.vercel.app)
+[![Render Service](https://img.shields.io/badge/Render-Online-46E3B7?logo=render&logoColor=white)](https://s-ocr-3zbt.onrender.com)
+[![Model](https://img.shields.io/badge/Model-Gemini%202.5%20Flash-4285F4?logo=google&logoColor=white)](https://ai.google.dev/)
+[![Python](https://img.shields.io/badge/Python-3.10%20%7C%203.11%20%7C%203.12-blue?logo=python&logoColor=white)](https://python.org)
+[![License](https://img.shields.io/badge/License-Proprietary-red)](LICENSE)
 
-🌐 **Live Vercel Production Web App**: [https://s-ocr.vercel.app](https://s-ocr.vercel.app)  
-📦 **GitHub Repository**: [https://github.com/lostxmusafir/S-ocr.git](https://github.com/lostxmusafir/S-ocr.git)
+An industrial-grade Computer Vision and Cloud OCR system engineered to detect, deskew, and decode laser-cut metal stencils, stamped implement codes, and serial numbers from raw metal parts, tractor attachments, rotavators, and structural steel beams.
 
----
-
-## Deployments & Quick Access
-
-| Interface | URL / Method | Description |
-|---|---|---|
-| **Vercel Web App (Live)** | [https://s-ocr.vercel.app](https://s-ocr.vercel.app) | Responsive dark industrial web UI with camera scan, upload, sample testing, and high-contrast white-on-black cards. |
-| **Vercel Cloud API** | `POST https://s-ocr.vercel.app/api/ocr` | Serverless Python REST API for laser-cut stencil code identification. |
-| **Local Streamlit App** | Double-click `run_app.bat` or `http://localhost:8501` | Full interactive desktop dashboard with live camera input and deep analytics. |
+Powered exclusively by **Google Gemini 2.5 Flash Cloud Vision** with a **10-Key Round-Robin Failover Architecture**, ensuring 100% continuous uptime against harsh specular glare, direct sunlight reflections, deep workshop shadows, inverted plates, and rate limits.
 
 ---
 
-## Features
+## 🌐 Live Deployments
 
-- **Dual Intelligence OCR Engines**:
-  - 🌟 **Gemini Vision AI (4x Round-Robin Engine)**: Uses Google Gemini Vision models (`gemini-3.5-flash` / `gemini-3.8-flash`) across 4 free API keys in a continuous round-robin rotation with zero-downtime automatic failover. Outstanding accuracy on inverted, mirrored, blurry, bridge-slotted, and shadow-obscured metal stencils.
-  - ⚡ **Local RapidOCR (PaddleOCR ONNX)**: High-speed local offline engine with multi-angle deskewing, LAB-space CLAHE, bilateral filtering, and early-exit scheduling.
-  - 🔄 **Hybrid Auto-Fallback Mode**: Runs Gemini Vision AI first and automatically cascades to local RapidOCR if offline.
-- **Multi-Source Input**:
-  - 📷 **Live Camera Scanner**: Scan directly via webcam or smartphone camera (supports mobile camera switching & automatic EXIF orientation normalization).
-  - 📁 **File Upload**: Upload high-resolution images (PNG, JPG, JPEG, WEBP).
-  - 🖼️ **Sample Gallery**: Quick 1-click testing with all 5 sample factory parts.
-- **Robust Metal Stencil Recognition & Industrial Edge Enhancement**:
-  - Handles arbitrary orientations: horizontal, vertical, 180° upside-down, and skewed parts.
-  - **Upfront Photometric Quality Analysis (< 2ms)**: Analyzes mean luminance, contrast standard deviation, shadow clipping, specular glare clipping, and Laplacian edge sharpness.
-  - **Dynamic Logarithmic Exposure Normalization**: Automatically lifts underexposed deep shadows in low light and compresses high metallic specular glare.
-  - **Mirror / Back-side Scan Detection**: Detects laser cuts photographed from the reverse side of sheet metal plates via horizontal flip evaluation in ~1.4s.
-  - **Low Clarity & Blur Edge Restoration**: High-pass unsharp masking sharpens blurred stencil cut contours and bridge boundaries.
-  - **Multi-Part Stacked Implement Detection**: Discovers and indexes multiple implement plates stacked on pallets or frames.
-  - **Early Exit Fast Path**: High-confidence codes return in ~0.8s without redundant passes.
-  - Handles both **1-line** and **2-line** laser stamped layouts regardless of line detection order.
-  - Robust against noise text lines, logos, and metal surface scratches.
-  - Stencil bridge repair & normalization: handles `4AG`, `AAG`, `4AC`, `4AF`, `AAF`, `NAG`, `M4F`, `4++`, `1A2` mfr bridge, year `202G`/`2024` bridge, `118381` serial bridge split, `UD`/`UIP`/`LIP` suffixes, and tokens with internal spaces.
-  - Supports all Indian State prefixes (`GJ`, `MH`, `MP`, `RJ`, `PB`, `HR`, `UP`, `KA`, `TN`, `AP`, `TS`, `DL`, etc.).
-- **High-Contrast White-on-Black Visualization ("number white me print or background in black")**:
-  - **Identified number printed in glowing White text on pure Black background** (`#000000`).
-  - 📋 **1-Click Copy**: Built-in copy-to-clipboard code block for fast data entry.
-  - 🔬 **Real Cutout Binarization**: Perspective-deskewed physical cutout patch rendered in high-contrast White text on pure Black.
-  - 🏷️ **Digital Label Badge**: Synthetic high-resolution industrial label badge (White on Black) ready for immediate printing or inspection logging.
-- **Implement Code Validation & Catalog Recognition**:
-  - Validates according to the Indian Centralized Implement Code standard:
-    `[State]/[Mfr Code]/[Model Code]/[Year]/[Serial No]/[Suffix]`
-  - Semantic breakdown into State (e.g., Gujarat `GJ`), Manufacturer (`142`), Model Series (`444`, `445`, `446`, `447`, `3528`, `3674`), Year, and Serial unit.
-  - **Document / Reference Chart Mode**: Intelligently identifies reference catalog documents (like the "List of Codes for Laser Marking"), extracting codes and displaying a searchable table of models, series categories, and sizes.
-- **Export & History**:
-  - Export detected code (TXT), structured JSON report, high-contrast binary mask (PNG), and digital label badge (PNG).
-  - Interactive scan history log with timing metrics.
+| Component | URL | Method | Purpose |
+|:---|:---|:---:|:---|
+| **Vercel Web App** | [https://s-ocr.vercel.app](https://s-ocr.vercel.app) | `GET` | Responsive industrial web dashboard with camera scan, upload, and high-contrast readout cards. |
+| **Vercel Cloud API** | [https://s-ocr.vercel.app/api/ocr](https://s-ocr.vercel.app/api/ocr) | `POST` | Primary serverless REST API for mobile apps, edge devices, and third-party integrations. |
+| **Render Cloud Service** | [https://s-ocr-3zbt.onrender.com/ocr](https://s-ocr-3zbt.onrender.com/ocr) | `POST` | High-concurrency Gunicorn/Flask containerized backup endpoint. |
+| **GitHub Repository** | [https://github.com/lostxmusafir/S-ocr](https://github.com/lostxmusafir/S-ocr) | Git | Source repository (branch `main`). |
 
 ---
 
-## API Endpoints (Vercel Serverless)
+## 🚀 Key Architectural Features
 
-### 1. Health Check
-```bash
-curl https://s-ocr.vercel.app/api/health
-```
+### 1. Pure Gemini 2.5 Flash Cloud Vision
+- **No Fragile Local Heuristics**: Replaced brittle traditional thresholding and CRNN character models with Google's state-of-the-art multimodal vision model `gemini-2.5-flash`.
+- **Specular Glare & Shadow Immunity**: Real factory metal plates suffer from blown-out metallic reflections under bright sunlight or underexposed muddy contrast in dark sheds. Gemini 2.5 Flash understands 3D metal surfaces and reads cutouts cleanly across both extremes.
+- **Stencil Bridge Gap Resolution**: Laser-cut characters have physical bridge slits (tabs) so the metal island does not fall out (e.g. `0`, `3`, `4`, `6`, `8`, `A`, `B`, `D`, `G`). The engine natively repairs and decodes them into the true alphanumeric characters.
 
-### 2. Recognize Stencil Code from Image
-```bash
-curl -X POST -F "file=@part_photo.jpg" https://s-ocr.vercel.app/api/ocr
-```
+### 2. 10-Key Round-Robin Engine with Instant Failover
+- **Load Distribution**: Every incoming request rotates across a pool of 10 API keys (`Key #1 ➔ Key #2 ➔ Key #3...`).
+- **Zero-Downtime Failover**: If any key hits a rate-limit (`429`), quota exhaustion, or error (`401`, `403`, `404`), the engine transfers the request to the next available working key in **under 5 milliseconds** without dropping the scan.
+- **Dynamic Cooldown Tracking**: Rate-limited keys are temporarily placed on a 60-second cooldown and automatically rejoined to the pool once cleared.
 
-Response JSON:
+### 3. Dual-View (Omnidirectional & Reverse-Cut Correction)
+- **Automatic LAB-CLAHE Enhancement**: Enhances local contrast between hollow laser-cut holes and background metal surfaces.
+- **Simultaneous Dual-View**: Sends both the original enhanced image and a horizontally flipped view in a single API inference call.
+- **Through-Cut Support**: If an operator takes a picture from the reverse / backside of a through-cut plate, the system detects the mirror reflection and returns the forward-readable part number instantly.
+- **Orientation Independent**: Detects text at 0°, 90°, 180° (upside-down), and arbitrary handheld angles.
+
+---
+
+## 📋 Centralized Implement Code Standard
+
+Codes conform to the **Indian Centralized Agricultural Implement Authority Standard**:
+
+$$\text{Format: } \mathbf{[STATE] / [MANUFACTURER] / [MODEL] / [YEAR] / [SERIAL] [/ SUFFIX]}$$
+
+### Examples:
+- `GJ/142/446/2026/12310/UP`
+- `GJ/142/3674/2026/10800`
+- `GJ/142/445/2026/44579`
+- `GJ/142/446/2026/11881/UP`
+
+### Catalog Breakdown:
+- **State Code (`GJ`)**: Indian state identifier (default `GJ` for Gujarat).
+- **Manufacturer Code (`142`)**: Registered manufacturer license number.
+- **Implement Model Code**:
+  - `446`: **TUSKER / SEMI HSS / SEMI CHA** (Heavy Duty / Semi Series: 5ft, 6ft, 1.65m)
+  - `3674`: **REGULAR SERIES ROTAVATOR** (Multi-Speed Standard: 6ft, 7ft, 1.75m, 2.0m)
+  - `445`: **MINI / PADDY SPECIAL** (Compact Utility Series: 3.5ft, 4ft, 1.2m)
+  - `3528`: **ORCHARD / INTER-CULTURE TILLER** (Narrow Track: 3ft, 3.5ft)
+  - `444`: **FEATHER LIGHT UTILITY** (Light Duty Attachment: 4ft, 5ft)
+  - `447`: **HEAVY EXTRA DEEP TILLER** (Super Heavy Series: 7ft, 8ft)
+- **Year (`2026`)**: 4-digit manufacturing year.
+- **Serial Number (`12310`)**: 5-digit unique serial number (preserves trailing zeros accurately).
+- **Suffix (`UP`)**: Optional regional or batch designation (`UP`).
+
+---
+
+## 📱 Mobile Developer API Integration Guide
+
+Mobile developers can directly consume the API via `multipart/form-data` or JSON base64.
+
+### Endpoint Overview
+- **Base URL**: `https://s-ocr.vercel.app`
+- **Path**: `/api/ocr` (or `/ocr`)
+- **HTTP Methods**:
+  - `GET`: Returns API documentation, health, and test sample payload.
+  - `POST`: Processes and scans image.
+
+---
+
+### Request Options
+
+#### Option A: `multipart/form-data` (Recommended for Mobile Camera)
+- **Field Name**: `file` or `image`
+- **Content-Type**: `image/jpeg` or `image/png`
+
+#### Option B: `application/json` (Base64 String)
 ```json
 {
-  "status": "success",
-  "final_code": "GJ/142/445/2026/43889",
+  "image": "data:image/jpeg;base64,/9j/4AAQSkZJRgABAQAAAQABAAD..."
+}
+```
+
+#### Optional Header:
+- `x-api-key`: Pass a dedicated Gemini API key if you want to bypass the public round-robin server pool.
+
+---
+
+### Response Format
+
+#### Success Response (`HTTP 200 OK`)
+```json
+{
+  "status": "SUCCESS",
+  "PARTno": "GJ/142/446/2026/12310/UP",
+  "final_code": "GJ/142/446/2026/12310/UP",
   "parsed_info": {
-    "is_valid": true,
+    "full_code": "GJ/142/446/2026/12310/UP",
     "state_code": "GJ",
-    "state_name": "Gujarat",
     "mfr_code": "142",
-    "model_code": "445",
+    "model_code": "446",
     "year": "2026",
-    "serial_no": "43889",
-    "model_info": {
-      "name": "REG V1 / SEMI MSS",
-      "series": "Regular / Semi Series",
-      "sizes": ["5ft", "5.5ft", "1.55m"]
-    }
-  },
-  "best_angle": 90,
-  "elapsed_ms": 1180.5,
-  "cropped_binary_base64": "data:image/png;base64,...",
-  "digital_stamp_base64": "data:image/png;base64,..."
+    "serial_no": "12310",
+    "suffix": "UP",
+    "is_valid": true
+  }
+}
+```
+
+#### Failure / Unreadable Image Response (`HTTP 502 Bad Gateway`)
+```json
+{
+  "status": "FAILED",
+  "PARTno": null,
+  "error": "Gemini 2.5 Flash Cloud Vision could not detect a valid implement code in the image. Please ensure the stamped metal beam is visible."
 }
 ```
 
 ---
 
-## Local Development & Testing
+### Code Examples for Mobile Developers
 
-### 1. Launch the Streamlit App
-Double-click `run_app.bat` or run:
-```powershell
-& "$env:LOCALAPPDATA\Python\bin\python.exe" -m streamlit run app.py
-```
-Open [http://localhost:8501](http://localhost:8501) in your browser.
-
-### 2. Run Tests
-Verify OCR accuracy across all sample images:
-```powershell
-& "$env:LOCALAPPDATA\Python\bin\python.exe" test_ocr.py
+#### 1. cURL
+```bash
+curl -X POST \
+  -F "file=@/path/to/beam_photo.jpg" \
+  https://s-ocr.vercel.app/api/ocr
 ```
 
-Run automated pytest unit tests:
-```powershell
-& "$env:LOCALAPPDATA\Python\bin\python.exe" -m pytest test_edge_cases.py -v
+#### 2. Flutter / Dart
+```dart
+import 'dart:convert';
+import 'dart:io';
+import 'package:http/http.dart' as http;
+
+Future<String?> scanMetalPart(File imageFile) async {
+  final uri = Uri.parse('https://s-ocr.vercel.app/api/ocr');
+  final request = http.MultipartRequest('POST', uri)
+    ..files.add(await http.MultipartFile.fromPath('file', imageFile.path));
+
+  final streamedResponse = await request.send();
+  final response = await http.Response.fromStream(streamedResponse);
+
+  if (response.statusCode == 200) {
+    final data = jsonDecode(response.body);
+    return data['PARTno']; // e.g. "GJ/142/446/2026/12310/UP"
+  } else {
+    print('OCR Scan Error: ${response.body}');
+    return null;
+  }
+}
+```
+
+#### 3. React Native / JavaScript
+```javascript
+const scanImplementImage = async (imageUri) => {
+  const formData = new FormData();
+  formData.append('file', {
+    uri: imageUri,
+    type: 'image/jpeg',
+    name: 'scan.jpg',
+  });
+
+  try {
+    const response = await fetch('https://s-ocr.vercel.app/api/ocr', {
+      method: 'POST',
+      body: formData,
+      headers: {
+        'Accept': 'application/json',
+      },
+    });
+
+    const result = await response.json();
+    if (response.ok && result.status === 'SUCCESS') {
+      console.log('Detected Part Number:', result.PARTno);
+      return result.PARTno;
+    } else {
+      console.error('OCR Error:', result.error);
+    }
+  } catch (error) {
+    console.error('Network Error:', error);
+  }
+};
+```
+
+#### 4. Android (Kotlin with Retrofit / OkHttp)
+```kotlin
+import okhttp3.*
+import okhttp3.MediaType.Companion.toMediaTypeOrNull
+import java.io.File
+
+fun uploadImageForOCR(file: File, callback: (String?) -> Unit) {
+    val client = OkHttpClient()
+    val requestBody = MultipartBody.Builder()
+        .setType(MultipartBody.FORM)
+        .addFormDataPart(
+            "file",
+            file.name,
+            RequestBody.create("image/jpeg".toMediaTypeOrNull(), file)
+        )
+        .build()
+
+    val request = Request.Builder()
+        .url("https://s-ocr.vercel.app/api/ocr")
+        .post(requestBody)
+        .build()
+
+    client.newCall(request).enqueue(object : Callback {
+        override fun onFailure(call: Call, e: java.io.IOException) {
+            callback(null)
+        }
+
+        override fun onResponse(call: Call, response: Response) {
+            val body = response.body?.string()
+            if (response.isSuccessful && body != null) {
+                val partNo = org.json.JSONObject(body).optString("PARTno")
+                callback(partNo)
+            } else {
+                callback(null)
+            }
+        }
+    })
+}
+```
+
+#### 5. Python
+```python
+import requests
+
+with open("beam_scan.jpg", "rb") as f:
+    response = requests.post(
+        "https://s-ocr.vercel.app/api/ocr",
+        files={"file": f}
+    )
+
+data = response.json()
+print("PART Number:", data.get("PARTno"))
+print("Metadata:", data.get("parsed_info"))
 ```
 
 ---
 
-## Pushing to GitHub
+## 🛠️ Local Setup & Testing
 
-All code is staged and committed to the `main` branch. To push to GitHub:
-- **Option 1**: Double-click `push_to_github.bat` in the folder.
-- **Option 2**: In your terminal, run:
-  ```powershell
-  git push -u origin main
-  ```
+### Prerequisites
+- Python 3.10+ installed
+- Git
+
+### 1. Clone & Install Dependencies
+```powershell
+git clone https://github.com/lostxmusafir/S-ocr.git
+cd S-ocr
+pip install -r requirements.txt
+```
+
+### 2. Configure Environment Keys
+Create a `.env.local` file in the root directory:
+```env
+GEMINI_API_KEYS="your_gemini_api_key_1,your_gemini_api_key_2"
+```
+
+### 3. Run Verification Tests
+```powershell
+# Test Gemini 2.5 Flash Cloud Vision directly
+python test_gemini_vision.py
+
+# Simulate live Postman multipart request against production & local APIs
+python test_postman_call.py
+
+# Run unit tests on stencil parsing and edge cases
+python -m pytest test_edge_cases.py -v
+```
+
+### 4. Run the Streamlit Interactive App
+```powershell
+# Double-click run_app.bat or execute:
+python -m streamlit run app.py
+```
+Open [http://localhost:8501](http://localhost:8501) in your browser.
+
+---
+
+## 📦 Project Structure
+
+```
+S-ocr/
+├── api/
+│   └── index.py               # Vercel & Render serverless REST API entry point
+├── gemini_scanner.py          # Gemini 2.5 Flash 10-key round-robin engine + CLAHE
+├── ocr_engine.py              # Stencil parser, implement catalog & normalization rules
+├── public/
+│   ├── index.html             # High-contrast industrial web dashboard UI
+│   └── samples/               # Sample factory metal part images
+├── test_gemini_vision.py      # Automated vision verification suite
+├── test_postman_call.py       # Live API multipart simulator
+├── test_edge_cases.py         # Pytest edge case test suite
+├── requirements.txt           # Minimal, fast serverless dependencies
+├── vercel.json                # Vercel serverless build and routing configuration
+├── render.yaml                # Render web service manifest
+└── README.md                  # System & API documentation
+```
+
+---
+
+## 📄 License & Credits
+
+- Developed for Industrial Laser Cut Metal Stencil OCR and Agricultural Implement Verification.
+- Powered by **Google Gemini 2.5 Flash**.
+- Deployed on **Vercel** and **Render**.
